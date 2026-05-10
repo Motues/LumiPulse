@@ -32,7 +32,7 @@ jobs:
           path: frontend/dist/
 
   build-backend:
-    name: Build Go Version
+    name: Build Backend
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -51,10 +51,10 @@ jobs:
           [ "${{ matrix.goos }}" = "windows" ] && OUTPUT="${OUTPUT}.exe"
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o "dist/${OUTPUT}" main.go
       # 保存编译好的二进制文件
-      - name: Upload Go Binary
+      - name: Upload Binary
         uses: actions/upload-artifact@v4
         with:
-          name: go-bin-${{ matrix.goos }}
+          name: backend-bin-${{ matrix.goos }}
           path: backend/dist/
 
   zip-files:
@@ -91,7 +91,6 @@ jobs:
           LINUX_BIN="downloads/backend-bin-linux/lumipulse-linux-amd64"
           if [ -f "$LINUX_BIN" ]; then
             cp "$LINUX_BIN" backend-release/
-            cp backend/script/lumipulse.bash backend-release/
             tar -czhf backend-linux-amd64.tar.gz -C backend-release .
             rm backend-release/lumipulse-linux-amd64
           fi
