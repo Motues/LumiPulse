@@ -1,0 +1,29 @@
+# build output
+dist/
+public/
+build/
+
+# generated types
+
+# code
+.vscode/
+
+# data
+/data
+/config
+*.db
+*.db.bak
+
+# dependencies
+node_modules/
+
+# logs
+pnpm-debug.log*
+*.log
+
+# environment variables
+.env
+.env.production
+
+# macOS-specific files
+.DS_Store

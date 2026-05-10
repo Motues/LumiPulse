@@ -1,0 +1,9 @@
+services:
+  lumipulse:
+    image: ghcr.io/motues/lumipulse:latest
+    container_name: lumipulse
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data      # 数据库文件
