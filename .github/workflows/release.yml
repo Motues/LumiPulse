@@ -108,6 +108,6 @@ jobs:
           files: |
             *.zip
             *.tar.gz
-          name: Release ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           draft: false
           prerelease: false

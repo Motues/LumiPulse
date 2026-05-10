@@ -25,8 +25,59 @@
 
 ## 快速开始
 
+### Docker 部署
+
+LumiPulse 支持 Docker 一键部署，镜像发布在 GitHub Container Registry。
+
+```bash
+# 使用 docker-compose（推荐）
+curl -fsSLO https://raw.githubusercontent.com/Motues/lumipulse/main/docker-compose.yml
+docker compose up -d
+
+# 或直接运行
+docker run -d \
+  --name lumipulse \
+  -p 3000:3000 \
+  -v momo-data:/app/data \
+  ghcr.io/motues/lumipulse:latest
+```
+
+启动成功后，访问 `http://localhost:3000` 为公共状态页，`htttp://localhost:3000/login` 为登录页面，**默认用户和密码均为`lumi`，首次进入需要修改用户名和密码**。
+
+### 二进制文件部署
+
+#### 1. 下载二进制文件
+
+从 [Release](https://github.com/Motues/lumipulse/releases/latest) 下载最新的二进制压缩包，根据你的系统选择对应的文件：
+
+* **Linux**: `backend-linux-amd64.tar.gz` 
+* **Windows**: `backend-windows-amd64.zip`
+
+以 Linux 为例，可以使用自带的脚本进行部署：
+
+```bash
+wget https://github.com/Motues/lumipulse/releases/latest/download/backend-linux-amd64.tar.gz
+tar -xzf backend-linux-amd64.tar.gz
+./lumipulse-linux-amd64
+```
+
+#### 2. 设置环境变量
+
+运行之后会生成一个 `./config/config.yaml` 文件，可以参考下面的环境变量，请根据需要修改，修改后需要重启服务。
+
+```bash
+vim ./config/config.yaml
+# 根据实际情况修改环境变量
+# ./config/config.yaml
+# PORT: 3000  # server port
+```
+
+启动成功后，访问 `http://localhost:3000` 为公共状态页，`htttp://localhost:3000/login` 为登录页面，**默认用户和密码均为`lumi`，首次进入需要修改用户名和密码**。
+
+
 ## 相关文档
 
 *  API 文档：[doc/api.md](doc/api.md)
 *  数据库设计：[doc/data_table.md](doc/data_table.md)
 
+> Made with ❤️ by [Motues](https://www.motues.top)
