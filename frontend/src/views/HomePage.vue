@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../api/client'
 import type { SummaryResponse, Incident } from '../api/types'
 import ServiceMatrix from '../components/ServiceMatrix.vue'
@@ -12,6 +12,41 @@ const summary = ref<SummaryResponse | null>(null)
 const incidents = ref<Incident[]>([])
 const loading = ref(true)
 const error = ref('')
+const showSubscribeModal = ref(false)
+const subscribeEmail = ref('')
+const subscribing = ref(false)
+const subscribeMsg = ref('')
+const subscribeMsgType = ref('success')
+
+function openSubscribe() {
+  subscribeEmail.value = ''
+  subscribeMsg.value = ''
+  showSubscribeModal.value = true
+}
+
+async function handleSubscribe() {
+  const email = subscribeEmail.value.trim()
+  if (!email) return
+  subscribing.value = true
+  subscribeMsg.value = ''
+  try {
+    await api.subscribe(email)
+    subscribeMsg.value = '订阅成功！我们将通过邮件通知您服务状态变更。'
+    subscribeMsgType.value = 'success'
+    subscribeEmail.value = ''
+  } catch (e: any) {
+    subscribeMsg.value = e.message || '订阅失败，请稍后重试'
+    subscribeMsgType.value = 'error'
+  } finally {
+    subscribing.value = false
+  }
+}
+
+function closeSubscribeModal() {
+  showSubscribeModal.value = false
+  subscribeMsg.value = ''
+}
+
 
 const statusColors: Record<string, string> = {
   operational: '#34a761',
@@ -90,6 +125,8 @@ async function loadDailyStats() {
   }
 }
 
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
 onMounted(async () => {
   isMobile.value = window.innerWidth < 768
   try {
@@ -107,7 +144,7 @@ onMounted(async () => {
   }
 
   // Auto-refresh every 30s for real-time updates
-  setInterval(async () => {
+  refreshTimer = setInterval(async () => {
     try {
       const [sumRes, incRes] = await Promise.all([
         api.getSummary(),
@@ -116,9 +153,13 @@ onMounted(async () => {
       summary.value = sumRes.data
       incidents.value = incRes.data.incidents
     } catch {
-      // silent
+      error.value = '数据刷新失败'
     }
   }, 30000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
@@ -143,7 +184,7 @@ onMounted(async () => {
             <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
           </svg>
         </button>
-        <a v-if="emailEnabled" href="#" class="px-4 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-sm font-medium rounded-lg transition-colors">订阅更新</a>
+        <a v-if="emailEnabled" href="#" @click.prevent="openSubscribe" class="px-4 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-sm font-medium rounded-lg transition-colors">订阅更新</a>
       </div>
     </div>
   </nav>
@@ -177,9 +218,6 @@ onMounted(async () => {
               {{ formatDateTime(m.scheduledStart) }} CST - {{ formatDateTime(m.scheduledEnd) }} CST
             </p>
             <p v-if="m.description" class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ m.description }}</p>
-            <p v-if="m.affectedServices" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              受影响服务：{{ affectedServiceNames(m.affectedServices) }}
-            </p>
           </div>
         </div>
       </section>
@@ -276,8 +314,42 @@ onMounted(async () => {
           <p class="text-sm text-gray-500 dark:text-gray-400">我们会提前通知受影响的服务维护计划。</p>
         </div>
       </section>
-    </template>
+</template>
   </main>
+
+  <!-- Subscribe Modal -->
+  <Teleport to="body">
+    <div v-if="showSubscribeModal" class="fixed inset-0 z-50 flex items-center justify-center" @click.self="closeSubscribeModal">
+      <div class="absolute inset-0 bg-black/40" />
+      <div class="relative bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-100 dark:border-gray-800 p-6 w-full max-w-sm mx-4">
+        <h3 class="text-base font-bold text-gray-900 dark:text-gray-100 mb-1">订阅状态通知</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">获取服务状态变更和事件通知。</p>
+        <div class="flex gap-2">
+          <input
+            v-model="subscribeEmail"
+            type="email"
+            placeholder="输入邮箱地址..."
+            class="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 dark:bg-gray-800 dark:text-gray-100"
+          />
+          <button
+            @click="handleSubscribe"
+            :disabled="subscribing || !subscribeEmail"
+            class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {{ subscribing ? '提交中...' : '订阅' }}
+          </button>
+        </div>
+        <p v-if="subscribeMsg" :class="['text-xs mt-2', subscribeMsgType === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500']">{{ subscribeMsg }}</p>
+        <button
+          v-if="subscribeMsgType === 'success'"
+          @click="closeSubscribeModal"
+          class="mt-4 w-full px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium rounded-lg transition-colors"
+        >
+          关闭
+        </button>
+      </div>
+    </div>
+  </Teleport>
 
   <footer class="border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 mt-4">
     <div class="max-w-[1000px] mx-auto px-6 py-8 flex flex-col md:flex-row justify-between items-center gap-4">

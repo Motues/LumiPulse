@@ -201,3 +201,16 @@ type UpdateMaintenanceRequest struct {
 	Status           string `json:"status"`
 	AffectedServices string `json:"affectedServices"`
 }
+
+// Subscriber 公开订阅用户
+type Subscriber struct {
+	ID        int64  `db:"id" json:"id"`
+	Email     string `db:"email" json:"email"`
+	Verified  bool   `db:"verified" json:"verified"`
+	CreatedAt string `db:"created_at" json:"createdAt"`
+	UpdatedAt string `db:"updated_at" json:"updatedAt"`
+}
+
+type SubscribeRequest struct {
+	Email string `json:"email" binding:"required"`
+}

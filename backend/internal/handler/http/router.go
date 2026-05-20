@@ -8,6 +8,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 	// Public API - no auth required
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/health", h.Health)
 		v1.GET("/summary", h.GetSummary)
 		v1.GET("/services", h.ListServices)
 		v1.GET("/services/:id/history", h.GetServiceHistory)
@@ -15,6 +16,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 		v1.GET("/incidents", h.ListIncidents)
 		v1.GET("/maintenances", h.ListMaintenances)
 		v1.GET("/site-config", h.GetSiteConfig)
+			v1.POST("/subscribe", h.Subscribe)
 	}
 
 	// Admin API
@@ -68,6 +70,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 			auth.POST("/api-keys", h.CreateApiKey)
 			auth.PUT("/api-keys/:id", h.UpdateApiKey)
 			auth.DELETE("/api-keys/:id", h.DeleteApiKey)
+
+				// Subscribers
+				auth.GET("/subscribers", h.AdminListSubscribers)
+				auth.DELETE("/subscribers/:id", h.AdminDeleteSubscriber)
 		}
 	}
 }

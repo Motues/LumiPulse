@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../../api/client'
 import type { ServiceDetail } from '../../api/types'
 import { useToast } from '../../composables/useToast'
@@ -13,6 +13,17 @@ const showForm = ref(false)
 const editing = ref<ServiceDetail | null>(null)
 const form = ref({ name: '', url: '', description: '', type: 'http', interval: 60 })
 const dragIndex = ref<number | null>(null)
+const searchQuery = ref('')
+
+const filteredServices = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim()
+  if (!q) return services.value
+  return services.value.filter(s =>
+    s.name.toLowerCase().includes(q) ||
+    s.url.toLowerCase().includes(q) ||
+    (s.description && s.description.toLowerCase().includes(q))
+  )
+})
 
 const statusClass = (s: string) => {
   switch (s) {
@@ -146,6 +157,16 @@ onMounted(load)
       </button>
     </div>
 
+    <!-- Search -->
+    <div v-if="!loading" class="mb-4">
+      <input
+        v-model="searchQuery"
+        type="text"
+        placeholder="搜索服务名称或 URL..."
+        class="w-full px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 dark:bg-gray-800 dark:text-gray-100"
+      />
+    </div>
+
     <div v-if="loading" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
 
     <div v-else class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm">
@@ -165,7 +186,7 @@ onMounted(load)
         </thead>
         <tbody class="divide-y divide-gray-50 dark:divide-gray-800">
           <tr
-            v-for="(svc, idx) in services" :key="svc.id"
+            v-for="(svc, idx) in filteredServices" :key="svc.id"
             :draggable="true"
             @dragstart="onDragStart(idx)"
             @dragover="onDragOver"

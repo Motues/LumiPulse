@@ -12,8 +12,9 @@ import LogViewer from '../components/dashboard/LogViewer.vue'
 import UserManager from '../components/dashboard/UserManager.vue'
 import NotificationManager from '../components/dashboard/NotificationManager.vue'
 import ApiKeyManager from '../components/dashboard/ApiKeyManager.vue'
+import SubscriberManager from '../components/dashboard/SubscriberManager.vue'
 
-type Section = 'dashboard' | 'services' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'users' | 'notifications' | 'settings' | 'api-keys'
+type Section = 'dashboard' | 'services' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'users' | 'subscribers' | 'notifications' | 'settings' | 'api-keys'
 const activeSection = ref<Section>('dashboard')
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
@@ -64,6 +65,7 @@ const navGroups = [
       { id: 'notifications' as Section, label: '通知管理', icon: 'M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 01-3.46 0' },
       { id: 'settings' as Section, label: '系统设置', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
       { id: 'api-keys' as Section, label: 'API密钥', icon: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4' },
+      { id: 'subscribers' as Section, label: '订阅管理', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
     ],
   },
 ]
@@ -135,6 +137,8 @@ function switchSection(s: string) {
         <NotificationManager v-else-if="activeSection === 'notifications'" />
 
         <ApiKeyManager v-else-if="activeSection === 'api-keys'" />
+        <SubscriberManager v-else-if="activeSection === 'subscribers'" />
+
       </div>
     </main>
     <Toast />

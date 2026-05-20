@@ -46,8 +46,86 @@ func reconcileStatus(incidents []*model.Incident, svcID int64) string {
 	}
 }
 
+// batchCalcUptime computes uptime for all given service IDs in a single query.
+// Returns map[serviceID]uptimePercentage.
+func (h *Handler) batchCalcUptime(c *gin.Context, serviceIDs []int64, days int) map[int64]float64 {
+	dailiesMap, err := h.Repo.BatchGetServiceDailies(c.Request.Context(), serviceIDs, days)
+	if err != nil {
+		result := make(map[int64]float64, len(serviceIDs))
+		for _, id := range serviceIDs {
+			result[id] = 100.0
+		}
+		return result
+	}
+
+	result := make(map[int64]float64, len(serviceIDs))
+	for _, id := range serviceIDs {
+		dailies := dailiesMap[id]
+		totalUp := 0
+		totalDown := 0
+		for _, d := range dailies {
+			totalUp += d.UptimeCount
+			totalDown += d.DowntimeCount
+		}
+		total := totalUp + totalDown
+		if total == 0 {
+			result[id] = 100.0
+		} else {
+			result[id] = float64(totalUp) / float64(total) * 100
+		}
+	}
+	return result
+}
+
+// Health 健康检查端点（用于负载均衡和容器编排探针）
+func (h *Handler) Health(c *gin.Context) {
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "ok",
+		Data: gin.H{
+			"status":  "healthy",
+			"version": h.Version,
+		},
+	})
+}
+
+// Subscribe 公开订阅状态通知（邮箱）
+func (h *Handler) Subscribe(c *gin.Context) {
+	var req model.SubscribeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, model.APIResponse{Code: 400, Message: "请输入有效的邮箱地址"})
+		return
+	}
+
+	// Validate email
+	if msg := validateEmail(req.Email); msg != "" {
+		c.JSON(http.StatusBadRequest, model.APIResponse{Code: 400, Message: msg})
+		return
+	}
+
+	// Check if already subscribed
+	if existing, err := h.Repo.GetSubscriberByEmail(c.Request.Context(), req.Email); err == nil && existing != nil {
+		c.JSON(http.StatusOK, model.APIResponse{Code: 200, Message: "该邮箱已订阅"})
+		return
+	}
+
+	if _, err := h.Repo.CreateSubscriber(c.Request.Context(), req.Email); err != nil {
+		c.JSON(http.StatusInternalServerError, model.APIResponse{Code: 500, Message: "订阅失败，请稍后重试"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, model.APIResponse{Code: 201, Message: "订阅成功"})
+}
+
 // GetSummary 获取系统整体健康状况及当前活跃故障
 func (h *Handler) GetSummary(c *gin.Context) {
+	if cached := h.getCached(); cached != nil {
+		c.JSON(http.StatusOK, model.APIResponse{
+			Code: 200, Message: "ok", Data: cached,
+		})
+		return
+	}
+
 	services, err := h.Repo.ListServices(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch services"})
@@ -64,25 +142,36 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		activeMaints = nil
 	}
 
-	// Enrich incidents with updates
-	for i := range activeIncidents {
-		updates, err := h.Repo.ListIncidentUpdates(c.Request.Context(), activeIncidents[i].ID)
+	// Batch load incident updates
+	if len(activeIncidents) > 0 {
+		incIDs := make([]int64, len(activeIncidents))
+		for i, inc := range activeIncidents {
+			incIDs[i] = inc.ID
+		}
+		updatesMap, err := h.Repo.BatchListIncidentUpdates(c.Request.Context(), incIDs)
 		if err == nil {
-			activeIncidents[i].Updates = updates
+			for _, inc := range activeIncidents {
+				inc.Updates = updatesMap[inc.ID]
+			}
 		}
 	}
 
-	// Build service summaries with 90-day uptime
-	// Reconcile service status with active incidents in case of manually-created incidents
+	// Batch load 90-day uptime for all services
+	svcIDs := make([]int64, len(services))
+	for i, svc := range services {
+		svcIDs[i] = svc.ID
+	}
+	uptimeMap := h.batchCalcUptime(c, svcIDs, 90)
+
+	// Build service summaries
 	serviceSummaries := make([]model.ServiceSummary, 0, len(services))
 	for _, svc := range services {
-		uptime := h.calcUptime(c, svc.ID, 90)
 		serviceSummaries = append(serviceSummaries, model.ServiceSummary{
 			ID:     svc.ID,
 			Name:   svc.Name,
 			Status: reconcileStatus(activeIncidents, svc.ID),
 			URL:    svc.URL,
-			Uptime: uptime,
+			Uptime: uptimeMap[svc.ID],
 		})
 	}
 
@@ -113,6 +202,12 @@ func (h *Handler) GetSummary(c *gin.Context) {
 			Maintenances:  activeMaints,
 		},
 	})
+	h.setCache(model.SummaryResponse{
+		OverallStatus: overall,
+		Services:      serviceSummaries,
+		Incidents:     activeIncidents,
+		Maintenances:  activeMaints,
+	})
 }
 
 // ListServices 获取所有监控服务的当前状态列表
@@ -128,15 +223,20 @@ func (h *Handler) ListServices(c *gin.Context) {
 		activeIncidents = nil
 	}
 
+	svcIDs := make([]int64, len(services))
+	for i, svc := range services {
+		svcIDs[i] = svc.ID
+	}
+	uptimeMap := h.batchCalcUptime(c, svcIDs, 90)
+
 	summaries := make([]model.ServiceSummary, 0, len(services))
 	for _, svc := range services {
-		uptime := h.calcUptime(c, svc.ID, 90)
 		summaries = append(summaries, model.ServiceSummary{
 			ID:     svc.ID,
 			Name:   svc.Name,
 			Status: reconcileStatus(activeIncidents, svc.ID),
 			URL:    svc.URL,
-			Uptime: uptime,
+			Uptime: uptimeMap[svc.ID],
 		})
 	}
 
@@ -204,11 +304,17 @@ func (h *Handler) ListIncidents(c *gin.Context) {
 		return
 	}
 
-	// Enrich with updates
-	for i := range incidents {
-		updates, err := h.Repo.ListIncidentUpdates(c.Request.Context(), incidents[i].ID)
+	// Batch load updates
+	if len(incidents) > 0 {
+		incIDs := make([]int64, len(incidents))
+		for i, inc := range incidents {
+			incIDs[i] = inc.ID
+		}
+		updatesMap, err := h.Repo.BatchListIncidentUpdates(c.Request.Context(), incIDs)
 		if err == nil {
-			incidents[i].Updates = updates
+			for _, inc := range incidents {
+				inc.Updates = updatesMap[inc.ID]
+			}
 		}
 	}
 

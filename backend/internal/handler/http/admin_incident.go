@@ -2,6 +2,7 @@ package http
 
 import (
 	"lumipluse-backend/internal/model"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -52,6 +53,8 @@ func (h *Handler) CreateIncident(c *gin.Context) {
 		}
 		h.Repo.UpdateService(c.Request.Context(), svc)
 	}
+	auditLog("incident.create", fmt.Sprintf("title=%s impact=%s", inc.Title, inc.Impact))
+
 
 	c.JSON(http.StatusCreated, model.APIResponse{
 		Code:    201,
@@ -217,10 +220,16 @@ func (h *Handler) AdminListIncidents(c *gin.Context) {
 		return
 	}
 
-	for i := range incidents {
-		updates, err := h.Repo.ListIncidentUpdates(c.Request.Context(), incidents[i].ID)
+	if len(incidents) > 0 {
+		incIDs := make([]int64, len(incidents))
+		for i, inc := range incidents {
+			incIDs[i] = inc.ID
+		}
+		updatesMap, err := h.Repo.BatchListIncidentUpdates(c.Request.Context(), incIDs)
 		if err == nil {
-			incidents[i].Updates = updates
+			for _, inc := range incidents {
+				inc.Updates = updatesMap[inc.ID]
+			}
 		}
 	}
 

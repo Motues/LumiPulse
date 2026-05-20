@@ -4,6 +4,8 @@ import (
 	"context"
 	"lumipluse-backend/internal/model"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 func (r *repo) CreateIncident(ctx context.Context, inc *model.Incident) error {
@@ -100,4 +102,28 @@ func (r *repo) ListIncidentUpdates(ctx context.Context, incidentID int64) ([]*mo
 	query := `SELECT * FROM Incident_Update WHERE incident_id = ? ORDER BY created_at ASC`
 	err := r.db.SelectContext(ctx, &updates, query, incidentID)
 	return updates, err
+}
+
+func (r *repo) BatchListIncidentUpdates(ctx context.Context, incidentIDs []int64) (map[int64][]*model.IncidentUpdate, error) {
+	if len(incidentIDs) == 0 {
+		return make(map[int64][]*model.IncidentUpdate), nil
+	}
+
+	query := `SELECT * FROM Incident_Update WHERE incident_id IN (?) ORDER BY created_at ASC`
+	query, args, err := sqlx.In(query, incidentIDs)
+	if err != nil {
+		return nil, err
+	}
+	query = r.db.Rebind(query)
+
+	var updates []*model.IncidentUpdate
+	if err := r.db.SelectContext(ctx, &updates, query, args...); err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64][]*model.IncidentUpdate)
+	for _, u := range updates {
+		result[u.IncidentID] = append(result[u.IncidentID], u)
+	}
+	return result, nil
 }

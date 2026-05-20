@@ -63,7 +63,7 @@ func main() {
 	handler := &h.Handler{Repo: repo, Version: Version}
 
 	// Start health checker
-	hc := checker.New(repo)
+	hc := checker.New(repo, cfg.InsecureSkipVerify)
 	hc.Start(context.Background())
 
 	r := gin.Default()

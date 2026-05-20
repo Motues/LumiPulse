@@ -66,6 +66,7 @@ func InitSchema(db *sqlx.DB) error {
 		updated_at DATETIME DEFAULT (datetime('now'))
 	);
 	CREATE INDEX IF NOT EXISTS idx_incident_status ON Incident(status);
+	CREATE INDEX IF NOT EXISTS idx_incident_service_status ON Incident(service_id, status);
 
 	CREATE TABLE IF NOT EXISTS Incident_Update (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,7 +106,16 @@ func InitSchema(db *sqlx.DB) error {
 		is_active INTEGER DEFAULT 1,
 		created_at DATETIME DEFAULT (datetime('now'))
 	);
-	CREATE INDEX IF NOT EXISTS idx_apikey_key ON ApiKey(key);`
+	CREATE INDEX IF NOT EXISTS idx_apikey_key ON ApiKey(key);
+
+	CREATE TABLE IF NOT EXISTS Subscriber (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		email TEXT NOT NULL UNIQUE,
+		verified INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT (datetime('now')),
+		updated_at DATETIME DEFAULT (datetime('now'))
+	);
+`
 
 	_, err := db.Exec(schema)
 	if err != nil {

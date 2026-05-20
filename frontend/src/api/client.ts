@@ -53,6 +53,10 @@ export const api = {
   getSiteConfig: () =>
     request<ApiResponse<Record<string, string>>>('GET', '/site-config'),
 
+  // Public subscription
+  subscribe: (email: string) =>
+    request<ApiResponse<void>>('POST', '/subscribe', { email }),
+
   // Auth
   login: (username: string, password: string) =>
     request<ApiResponse<{ token: string; needsSetup: boolean }>>('POST', '/admin/login', { username, password }),
@@ -125,4 +129,8 @@ export const api = {
     request<ApiResponse<import('./types').Maintenance>>('PUT', `/admin/maintenances/${id}`, data, true),
   deleteMaintenance: (id: number) =>
     request<ApiResponse<void>>('DELETE', `/admin/maintenances/${id}`, undefined, true),
+
+  // Generic request for custom endpoints
+  request: <T = any>(method: string, path: string, body?: any, auth = false): Promise<T> =>
+    request<T>(method, path, body, auth),
 }

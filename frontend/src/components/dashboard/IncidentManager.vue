@@ -7,6 +7,9 @@ import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
 
 const incidents = ref<Incident[]>([])
 const loading = ref(true)
+const page = ref(1)
+const totalPage = ref(0)
+const limit = 15
 const { show: toast } = useToast()
 
 // Incident CRUD
@@ -49,13 +52,20 @@ const impactClass = (s: string) => {
 async function load() {
   loading.value = true
   try {
-    const res = await api.getAdminIncidents(1, 50)
+    const res = await api.getAdminIncidents(page.value, limit)
     incidents.value = res.data.incidents
+    totalPage.value = res.data.pagination.totalPage
   } catch (e: any) {
     toast(e.message || '加载失败')
   } finally {
     loading.value = false
   }
+}
+
+function goPage(p: number) {
+  if (p < 1 || p > totalPage.value) return
+  page.value = p
+  load()
 }
 
 async function loadServices() {
@@ -217,6 +227,27 @@ onMounted(() => {
         </tbody>
       </table>
         </div>
+    </div>
+
+    <!-- Pagination -->
+    <div v-if="totalPage > 1" class="flex items-center justify-center gap-2 mt-4">
+      <button
+        @click="goPage(page - 1)"
+        :disabled="page <= 1"
+        class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        上一页
+      </button>
+      <span class="text-sm text-gray-500 dark:text-gray-400 px-3">
+        第 {{ page }} / {{ totalPage }} 页
+      </span>
+      <button
+        @click="goPage(page + 1)"
+        :disabled="page >= totalPage"
+        class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        下一页
+      </button>
     </div>
 
     <!-- Incident Form -->

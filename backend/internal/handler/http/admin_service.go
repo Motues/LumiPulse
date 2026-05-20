@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"lumipluse-backend/internal/model"
 	"net/http"
 	"strconv"
@@ -23,6 +24,24 @@ func (h *Handler) CreateService(c *gin.Context) {
 		req.Interval = 60
 	}
 
+	// Validation
+	var errs validationErrors
+	if msg := validateServiceName(req.Name); msg != "" {
+		errs = append(errs, msg)
+	}
+	if msg := validateServiceURL(req.URL); msg != "" {
+		errs = append(errs, msg)
+	}
+	if req.Interval > 0 {
+		if msg := validateServiceInterval(req.Interval); msg != "" {
+			errs = append(errs, msg)
+		}
+	}
+	if errs.HasErrors() {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errs.Error()})
+		return
+	}
+
 	svc := &model.Service{
 		Name:        req.Name,
 		Description: req.Description,
@@ -36,6 +55,8 @@ func (h *Handler) CreateService(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create service"})
 		return
 	}
+
+	auditLog("service.create", fmt.Sprintf("name=%s url=%s", svc.Name, svc.URL))
 
 	c.JSON(http.StatusCreated, model.APIResponse{
 		Code:    201,
@@ -93,6 +114,8 @@ func (h *Handler) UpdateService(c *gin.Context) {
 		return
 	}
 
+	auditLog("service.update", fmt.Sprintf("id=%d name=%s", svc.ID, svc.Name))
+
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Service updated",
@@ -109,9 +132,15 @@ func (h *Handler) DeleteService(c *gin.Context) {
 		return
 	}
 
+	svc, _ := h.Repo.GetService(c.Request.Context(), id)
+
 	if err := h.Repo.DeleteService(c.Request.Context(), id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete service"})
 		return
+	}
+
+	if svc != nil {
+		auditLog("service.delete", fmt.Sprintf("id=%d name=%s", id, svc.Name))
 	}
 
 	c.JSON(http.StatusOK, model.APIResponse{
@@ -135,6 +164,8 @@ func (h *Handler) AdminReorderServices(c *gin.Context) {
 		}
 	}
 
+	auditLog("service.reorder", fmt.Sprintf("count=%d", len(req.Services)))
+
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Services reordered",
@@ -155,17 +186,26 @@ func (h *Handler) AdminListServices(c *gin.Context) {
 		Latency   int     `json:"latency"`
 	}
 
+	svcIDs := make([]int64, len(services))
+	for i, svc := range services {
+		svcIDs[i] = svc.ID
+	}
+	uptimeMap := h.batchCalcUptime(c, svcIDs, 90)
+
+	// Batch load latest heartbeat for all services
+	latencyMap := make(map[int64]int, len(services))
+	for _, svc := range services {
+		if hb, err := h.Repo.GetLatestHeartbeat(c.Request.Context(), svc.ID); err == nil {
+			latencyMap[svc.ID] = hb.Latency
+		}
+	}
+
 	result := make([]ServiceDetail, 0, len(services))
 	for _, svc := range services {
-		uptime := h.calcUptime(c, svc.ID, 90)
-		latency := 0
-		if hb, err := h.Repo.GetLatestHeartbeat(c.Request.Context(), svc.ID); err == nil {
-			latency = hb.Latency
-		}
 		result = append(result, ServiceDetail{
 			Service: *svc,
-			Uptime:  uptime,
-			Latency: latency,
+			Uptime:  uptimeMap[svc.ID],
+			Latency: latencyMap[svc.ID],
 		})
 	}
 

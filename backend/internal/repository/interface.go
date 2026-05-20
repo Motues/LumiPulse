@@ -25,6 +25,7 @@ type Repository interface {
 	GetOrCreateServiceDaily(ctx context.Context, serviceID int64, date string) (*model.ServiceDaily, error)
 	UpdateServiceDaily(ctx context.Context, d *model.ServiceDaily) error
 	GetServiceDailies(ctx context.Context, serviceID int64, days int) ([]*model.ServiceDaily, error)
+	BatchGetServiceDailies(ctx context.Context, serviceIDs []int64, days int) (map[int64][]*model.ServiceDaily, error)
 	DeleteOldServiceDailies(ctx context.Context, before string) error
 
 	// Incident
@@ -40,6 +41,7 @@ type Repository interface {
 	// IncidentUpdate
 	CreateIncidentUpdate(ctx context.Context, u *model.IncidentUpdate) error
 	ListIncidentUpdates(ctx context.Context, incidentID int64) ([]*model.IncidentUpdate, error)
+	BatchListIncidentUpdates(ctx context.Context, incidentIDs []int64) (map[int64][]*model.IncidentUpdate, error)
 
 	// Maintenance
 	CreateMaintenance(ctx context.Context, m *model.Maintenance) error
@@ -58,4 +60,10 @@ type Repository interface {
 	UpdateApiKeyLastUsed(ctx context.Context, id int64, ip string) error
 	UpdateApiKeyName(ctx context.Context, id int64, name string) error
 	DeleteApiKey(ctx context.Context, id int64) error
+
+	// Subscriber
+	CreateSubscriber(ctx context.Context, email string) (*model.Subscriber, error)
+	ListSubscribers(ctx context.Context) ([]*model.Subscriber, error)
+	DeleteSubscriber(ctx context.Context, id int64) error
+	GetSubscriberByEmail(ctx context.Context, email string) (*model.Subscriber, error)
 }

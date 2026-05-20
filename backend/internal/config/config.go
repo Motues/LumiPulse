@@ -10,7 +10,8 @@ import (
 
 // Config 结构体对应配置文件字段
 type Config struct {
-	Port int `yaml:"PORT"`
+	Port               int  `yaml:"PORT"`
+	InsecureSkipVerify bool `yaml:"INSECURE_SKIP_VERIFY"` // 跳过 HTTPS 证书验证（仅内部测试使用）
 }
 
 var GlobalConfig *Config

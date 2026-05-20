@@ -72,6 +72,8 @@ function copyKey() {
   navigator.clipboard.writeText(createdKey.value.key).then(() => {
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
+  }).catch(() => {
+    // Clipboard write may fail in non-HTTPS contexts
   })
 }
 

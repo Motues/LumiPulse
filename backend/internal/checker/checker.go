@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,14 +60,14 @@ type HealthChecker struct {
 	wg       sync.WaitGroup
 }
 
-func New(repo repository.Repository) *HealthChecker {
+func New(repo repository.Repository, insecureSkipVerify bool) *HealthChecker {
 	return &HealthChecker{
 		repo:     repo,
 		interval: 1 * time.Minute,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: insecureSkipVerify},
 			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
@@ -132,6 +133,21 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 
 	today := time.Now().Format("2006-01-02")
 
+	// Build set of service IDs under active maintenance
+	inMaint := make(map[int64]bool)
+	if maints, err := hc.repo.ListMaintenances(ctx); err == nil {
+		for _, m := range maints {
+			if m.Status == "in_progress" && m.AffectedServices != "" {
+				for _, idStr := range strings.Split(m.AffectedServices, ",") {
+					idStr = strings.TrimSpace(idStr)
+					if id, err := strconv.ParseInt(idStr, 10, 64); err == nil {
+						inMaint[id] = true
+					}
+				}
+			}
+		}
+	}
+
 	for _, svc := range services {
 		if !svc.IsActive {
 			continue
@@ -160,7 +176,8 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		isUp := (status >= 200 && status < 400) || status == 1
 		if isUp {
 			daily.UptimeCount++
-		} else {
+		} else if !inMaint[svc.ID] {
+			// Only count downtime when not under active maintenance
 			daily.DowntimeCount++
 		}
 		daily.TotalLatency += latency
@@ -180,102 +197,119 @@ func (hc *HealthChecker) trackServiceState(ctx context.Context, svc *model.Servi
 		st = &serviceState{}
 		hc.states[svc.ID] = st
 	}
-	hc.mu.Unlock()
 
 	if isUp {
 		st.consecutiveFailures = 0
 		st.consecutiveSuccesses++
+		shouldResolve := st.consecutiveSuccesses >= 5
+		incID := st.autoIncidentID
+		hc.mu.Unlock()
 
-		// After 5 consecutive successes, resolve any active incident
-		if st.consecutiveSuccesses >= 5 {
-			incID := st.autoIncidentID
+		if shouldResolve {
 			if incID == 0 {
-				// Check for manually-created incidents too
 				if existing, err := hc.repo.GetActiveIncidentByService(ctx, svc.ID); err == nil && existing != nil {
 					incID = existing.ID
 				}
 			}
-
 			if incID != 0 {
-				now := time.Now().Format(time.RFC3339)
-
-				update := &model.IncidentUpdate{
-					IncidentID: incID,
-					Status:     "resolved",
-					Content:    fmt.Sprintf("%s 服务已恢复运行", svc.Name),
-				}
-				if err := hc.repo.CreateIncidentUpdate(ctx, update); err != nil {
-					log.Printf("[checker] failed to create incident update: %v", err)
-				}
-
-				if inc, err := hc.repo.GetIncident(ctx, incID); err == nil {
-					inc.Status = "resolved"
-					inc.UpdatedAt = now
-					hc.repo.UpdateIncident(ctx, inc)
-				}
-
-				svc.Status = "operational"
-				hc.repo.UpdateService(ctx, svc)
-
-				log.Printf("[checker] resolved incident #%d for service %s", incID, svc.Name)
-				st.autoIncidentID = 0
-
-				notifyResolved(svc.Name)
+				hc.resolveIncident(ctx, svc, incID)
 			}
 		}
 	} else {
 		st.consecutiveSuccesses = 0
 		st.consecutiveFailures++
+		failCount := st.consecutiveFailures
+		hasAutoIncident := st.autoIncidentID != 0
+		hc.mu.Unlock()
 
-		// After 5 consecutive failures, create or link to an incident
-		if st.consecutiveFailures >= 5 && st.autoIncidentID == 0 {
+		if failCount >= 5 && !hasAutoIncident {
 			// Don't create incident if service is under active maintenance
 			maints, err := hc.repo.ListActiveMaintenancesByService(ctx, svc.ID)
 			if err == nil && inMaintenance(maints) {
-				log.Printf("[checker] skipping incident for service %s (under maintenance)", svc.Name)
-				// Reset failure counter so we don't keep querying every cycle
+				hc.mu.Lock()
 				st.consecutiveFailures = 0
+				hc.mu.Unlock()
+				log.Printf("[checker] skipping incident for service %s (under maintenance)", svc.Name)
 				return
 			}
 
 			// Don't create a new incident if one already exists for this service
 			if existing, err := hc.repo.GetActiveIncidentByService(ctx, svc.ID); err == nil && existing != nil {
+				hc.mu.Lock()
 				st.autoIncidentID = existing.ID
+				hc.mu.Unlock()
 				log.Printf("[checker] linked existing incident #%d for service %s", existing.ID, svc.Name)
 				return
 			}
 
-			now := time.Now().Format(time.RFC3339)
-
-			inc := &model.Incident{
-				ServiceID: svc.ID,
-				Title:     fmt.Sprintf("%s 服务异常", svc.Name),
-				Impact:    "major",
-				Status:    "investigating",
-				CreatedAt: now,
-				UpdatedAt: now,
-			}
-			if err := hc.repo.CreateIncident(ctx, inc); err != nil {
-				log.Printf("[checker] failed to create incident: %v", err)
-				return
-			}
-
-			update := &model.IncidentUpdate{
-				IncidentID: inc.ID,
-				Status:     "investigating",
-				Content:    fmt.Sprintf("检测到 %s 服务连续异常，正在排查中", svc.Name),
-			}
-			hc.repo.CreateIncidentUpdate(ctx, update)
-
-			svc.Status = "degraded"
-			hc.repo.UpdateService(ctx, svc)
-
-			st.autoIncidentID = inc.ID
-			log.Printf("[checker] auto-created incident #%d for service %s", inc.ID, svc.Name)
-
-			notifyAlert(svc.Name, svc.URL, now)
+			hc.createIncident(ctx, svc, st)
 		}
 	}
+}
+
+func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service, incID int64) {
+	now := time.Now().Format(time.RFC3339)
+
+	update := &model.IncidentUpdate{
+		IncidentID: incID,
+		Status:     "resolved",
+		Content:    fmt.Sprintf("%s 服务已恢复运行", svc.Name),
+	}
+	if err := hc.repo.CreateIncidentUpdate(ctx, update); err != nil {
+		log.Printf("[checker] failed to create incident update: %v", err)
+	}
+
+	if inc, err := hc.repo.GetIncident(ctx, incID); err == nil {
+		inc.Status = "resolved"
+		inc.UpdatedAt = now
+		hc.repo.UpdateIncident(ctx, inc)
+	}
+
+	svc.Status = "operational"
+	hc.repo.UpdateService(ctx, svc)
+
+	hc.mu.Lock()
+	if st, ok := hc.states[svc.ID]; ok {
+		st.autoIncidentID = 0
+	}
+	hc.mu.Unlock()
+
+	log.Printf("[checker] resolved incident #%d for service %s", incID, svc.Name)
+	notifyResolved(svc.Name)
+}
+
+func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service, st *serviceState) {
+	now := time.Now().Format(time.RFC3339)
+
+	inc := &model.Incident{
+		ServiceID: svc.ID,
+		Title:     fmt.Sprintf("%s 服务异常", svc.Name),
+		Impact:    "major",
+		Status:    "investigating",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := hc.repo.CreateIncident(ctx, inc); err != nil {
+		log.Printf("[checker] failed to create incident: %v", err)
+		return
+	}
+
+	update := &model.IncidentUpdate{
+		IncidentID: inc.ID,
+		Status:     "investigating",
+		Content:    fmt.Sprintf("检测到 %s 服务连续异常，正在排查中", svc.Name),
+	}
+	hc.repo.CreateIncidentUpdate(ctx, update)
+
+	svc.Status = "degraded"
+	hc.repo.UpdateService(ctx, svc)
+
+	hc.mu.Lock()
+	st.autoIncidentID = inc.ID
+	hc.mu.Unlock()
+
+	log.Printf("[checker] auto-created incident #%d for service %s", inc.ID, svc.Name)
+	notifyAlert(svc.Name, svc.URL, now)
 }
 
 func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {

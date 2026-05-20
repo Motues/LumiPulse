@@ -4,6 +4,8 @@ import (
 	"context"
 	"lumipluse-backend/internal/model"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 func (r *repo) GetOrCreateServiceDaily(ctx context.Context, serviceID int64, date string) (*model.ServiceDaily, error) {
@@ -39,6 +41,31 @@ func (r *repo) GetServiceDailies(ctx context.Context, serviceID int64, days int)
 		"SELECT * FROM ServiceDaily WHERE service_id = ? AND date >= ? ORDER BY date ASC",
 		serviceID, since)
 	return dailies, err
+}
+
+func (r *repo) BatchGetServiceDailies(ctx context.Context, serviceIDs []int64, days int) (map[int64][]*model.ServiceDaily, error) {
+	if len(serviceIDs) == 0 {
+		return make(map[int64][]*model.ServiceDaily), nil
+	}
+
+	since := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	query := `SELECT * FROM ServiceDaily WHERE service_id IN (?) AND date >= ? ORDER BY date ASC`
+	query, args, err := sqlx.In(query, serviceIDs, since)
+	if err != nil {
+		return nil, err
+	}
+	query = r.db.Rebind(query)
+
+	var dailies []*model.ServiceDaily
+	if err := r.db.SelectContext(ctx, &dailies, query, args...); err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64][]*model.ServiceDaily)
+	for _, d := range dailies {
+		result[d.ServiceID] = append(result[d.ServiceID], d)
+	}
+	return result, nil
 }
 
 func (r *repo) DeleteOldServiceDailies(ctx context.Context, before string) error {
