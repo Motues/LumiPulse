@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { api } from '../../api/client'
 import type { Incident, Service } from '../../api/types'
 import { useToast } from '../../composables/useToast'
+import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
 
 const incidents = ref<Incident[]>([])
 const loading = ref(true)
@@ -66,10 +67,18 @@ async function loadServices() {
   }
 }
 
+const { markClean: cleanInc, handleClose: closeInc, restoreFromStorage: restoreInc } = useUnsavedChanges(form as any, 'inc_form')
+
+// Track dirty state for incident update form
+const updateDirty = ref(false)
+watch(updateForm, (n, o) => { if (o.content !== undefined) updateDirty.value = true }, { deep: true })
+
 function openCreate() {
   editing.value = null
-  form.value = { title: '', impact: 'minor', status: 'investigating', serviceId: 0 }
-  serviceSearch.value = ''
+  const defaults = { title: '', impact: 'minor', status: 'investigating', serviceId: 0 }
+  form.value = { ...defaults }
+  restoreInc()
+  cleanInc()
   showForm.value = true
 }
 
@@ -78,7 +87,12 @@ function openEdit(inc: Incident) {
   form.value = { title: inc.title, impact: inc.impact, status: inc.status, serviceId: inc.serviceId }
   const svc = services.value.find(s => s.id === inc.serviceId)
   serviceSearch.value = svc ? svc.name : ''
+  cleanInc()
   showForm.value = true
+}
+
+function handleCloseInc() {
+  if (closeInc()) showForm.value = false
 }
 
 function delayBlur() {
@@ -99,6 +113,7 @@ async function save() {
       await api.createIncident(form.value)
     }
     showForm.value = false
+    cleanInc()
     toast(editing.value ? '更新成功' : '创建成功', 'success')
     load()
   } catch (e: any) {
@@ -123,11 +138,17 @@ function openUpdate(inc: Incident) {
   showUpdate.value = true
 }
 
+function handleCloseUpdate() {
+  if (updateDirty.value && !confirm('有未保存的更改，确定要关闭吗？')) return
+  showUpdate.value = false
+}
+
 async function saveUpdate() {
   if (!updateIncident.value) return
   try {
     await api.createIncidentUpdate(updateIncident.value.id, updateForm.value)
     showUpdate.value = false
+    updateDirty.value = false
     toast('更新成功', 'success')
     load()
   } catch (e: any) {
@@ -199,7 +220,7 @@ onMounted(() => {
     </div>
 
     <!-- Incident Form -->
-    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showForm = false">
+    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseInc">
       <div class="bg-white dark:bg-gray-900 rounded-xl p-4 md:p-6 w-full max-w-lg mx-4 shadow-xl">
         <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">{{ editing ? '编辑事件' : '创建事件' }}</h3>
         <div class="space-y-4">
@@ -254,14 +275,14 @@ onMounted(() => {
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="showForm = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
+          <button @click="handleCloseInc" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
           <button @click="save" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
         </div>
       </div>
     </div>
 
     <!-- Incident Update Form -->
-    <div v-if="showUpdate && updateIncident" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showUpdate = false">
+    <div v-if="showUpdate && updateIncident" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseUpdate">
       <div class="bg-white dark:bg-gray-900 rounded-xl p-4 md:p-6 w-full max-w-lg mx-4 shadow-xl">
         <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">事件更新</h3>
         <div class="text-sm text-gray-500 dark:text-gray-400 mb-4">更新事件: {{ updateIncident.title }}</div>
@@ -281,7 +302,7 @@ onMounted(() => {
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="showUpdate = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
+          <button @click="handleCloseUpdate" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
           <button @click="saveUpdate" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
         </div>
       </div>

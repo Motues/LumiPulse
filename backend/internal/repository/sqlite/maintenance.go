@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"lumipluse-backend/internal/model"
+	"strconv"
 	"time"
 )
 
@@ -32,6 +33,15 @@ func (r *repo) ListActiveMaintenances(ctx context.Context) ([]*model.Maintenance
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	query := `SELECT * FROM Maintenance WHERE status IN ('scheduled', 'in_progress') AND scheduled_end >= ? ORDER BY scheduled_start ASC`
 	err := r.db.SelectContext(ctx, &maintenances, query, now)
+	return maintenances, err
+}
+
+func (r *repo) ListActiveMaintenancesByService(ctx context.Context, serviceID int64) ([]*model.Maintenance, error) {
+	var maintenances []*model.Maintenance
+	svcIDStr := strconv.FormatInt(serviceID, 10)
+	// Use comma wrapping to match exact service ID within comma-separated list
+	query := `SELECT * FROM Maintenance WHERE status = 'in_progress' AND (',' || affected_services || ',') LIKE ('%,' || ? || ',%')`
+	err := r.db.SelectContext(ctx, &maintenances, query, svcIDStr)
 	return maintenances, err
 }
 

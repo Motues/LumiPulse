@@ -16,6 +16,33 @@ import (
 	"lumipluse-backend/internal/repository"
 )
 
+// parseTime parses a time string in various formats and returns UTC time.
+// Strings without timezone info are assumed to be CST (UTC+8) for backward compatibility.
+func parseTime(s string) time.Time {
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			// If parsed time has no timezone (UTC), it was likely stored as CST before the timezone fix
+			if t.Location() == time.UTC && !strings.HasSuffix(s, "Z") && !strings.ContainsAny(s, "+-") {
+				// Treat as CST (UTC+8) and convert to UTC
+				return t.Add(-8 * time.Hour)
+			}
+			return t.UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
+func inMaintenance(maintenances []*model.Maintenance) bool {
+	return len(maintenances) > 0
+}
+
 type serviceState struct {
 	consecutiveFailures  int
 	consecutiveSuccesses int
@@ -76,6 +103,7 @@ func (hc *HealthChecker) loop(ctx context.Context) {
 
 	// Do first check immediately
 	hc.checkAll(ctx)
+	hc.reconcileMaintenanceStatus(ctx)
 
 	for {
 		select {
@@ -85,6 +113,7 @@ func (hc *HealthChecker) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			hc.checkAll(ctx)
+			hc.reconcileMaintenanceStatus(ctx)
 
 			if time.Since(lastCleanup) > 24*time.Hour {
 				hc.cleanup(ctx)
@@ -200,6 +229,15 @@ func (hc *HealthChecker) trackServiceState(ctx context.Context, svc *model.Servi
 
 		// After 5 consecutive failures, create or link to an incident
 		if st.consecutiveFailures >= 5 && st.autoIncidentID == 0 {
+			// Don't create incident if service is under active maintenance
+			maints, err := hc.repo.ListActiveMaintenancesByService(ctx, svc.ID)
+			if err == nil && inMaintenance(maints) {
+				log.Printf("[checker] skipping incident for service %s (under maintenance)", svc.Name)
+				// Reset failure counter so we don't keep querying every cycle
+				st.consecutiveFailures = 0
+				return
+			}
+
 			// Don't create a new incident if one already exists for this service
 			if existing, err := hc.repo.GetActiveIncidentByService(ctx, svc.ID); err == nil && existing != nil {
 				st.autoIncidentID = existing.ID
@@ -236,6 +274,41 @@ func (hc *HealthChecker) trackServiceState(ctx context.Context, svc *model.Servi
 			log.Printf("[checker] auto-created incident #%d for service %s", inc.ID, svc.Name)
 
 			notifyAlert(svc.Name, svc.URL, now)
+		}
+	}
+}
+
+func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
+	maintenances, err := hc.repo.ListMaintenances(ctx)
+	if err != nil {
+		log.Printf("[checker] list maintenances error: %v", err)
+		return
+	}
+
+	now := time.Now().UTC()
+
+	for _, m := range maintenances {
+		if m.Status != "scheduled" && m.Status != "in_progress" {
+			continue
+		}
+
+		start := parseTime(m.ScheduledStart)
+		end := parseTime(m.ScheduledEnd)
+
+		if m.Status == "scheduled" && !now.Before(start) {
+			m.Status = "in_progress"
+			if err := hc.repo.UpdateMaintenance(ctx, m); err != nil {
+				log.Printf("[checker] failed to update maintenance #%d to in_progress: %v", m.ID, err)
+			} else {
+				log.Printf("[checker] auto-updated maintenance #%d (%s) to in_progress", m.ID, m.Title)
+			}
+		} else if m.Status == "in_progress" && !now.Before(end) {
+			m.Status = "completed"
+			if err := hc.repo.UpdateMaintenance(ctx, m); err != nil {
+				log.Printf("[checker] failed to update maintenance #%d to completed: %v", m.ID, err)
+			} else {
+				log.Printf("[checker] auto-updated maintenance #%d (%s) to completed", m.ID, m.Title)
+			}
 		}
 	}
 }
@@ -280,6 +353,7 @@ func (hc *HealthChecker) checkHTTP(svc *model.Service) (int, int, string) {
 		return 0, int(time.Since(start).Milliseconds()), err.Error()
 	}
 	req.Close = true
+	req.Header.Set("User-Agent", "LumiPulse")
 
 	resp, err := hc.client.Do(req)
 	latency := int(time.Since(start).Milliseconds())

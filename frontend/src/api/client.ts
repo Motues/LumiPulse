@@ -91,6 +91,8 @@ export const api = {
     request<ApiResponse<import('./types').Service>>('PUT', `/admin/services/${id}`, data, true),
   deleteService: (id: number) =>
     request<ApiResponse<void>>('DELETE', `/admin/services/${id}`, undefined, true),
+  reorderServices: (services: { id: number; sortOrder: number }[]) =>
+    request<ApiResponse<void>>('PUT', '/admin/services/reorder', { services }, true),
 
   // Admin - Incidents
   getAdminIncidents: (page = 1, limit = 20) =>

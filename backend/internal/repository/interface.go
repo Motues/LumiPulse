@@ -11,6 +11,7 @@ type Repository interface {
 	ListServices(ctx context.Context) ([]*model.Service, error)
 	GetService(ctx context.Context, id int64) (*model.Service, error)
 	UpdateService(ctx context.Context, s *model.Service) error
+	UpdateServiceSortOrder(ctx context.Context, id int64, sortOrder int) error
 	DeleteService(ctx context.Context, id int64) error
 
 	// Heartbeat
@@ -44,6 +45,7 @@ type Repository interface {
 	CreateMaintenance(ctx context.Context, m *model.Maintenance) error
 	ListMaintenances(ctx context.Context) ([]*model.Maintenance, error)
 	ListActiveMaintenances(ctx context.Context) ([]*model.Maintenance, error)
+	ListActiveMaintenancesByService(ctx context.Context, serviceID int64) ([]*model.Maintenance, error)
 	GetMaintenance(ctx context.Context, id int64) (*model.Maintenance, error)
 	UpdateMaintenance(ctx context.Context, m *model.Maintenance) error
 	DeleteMaintenance(ctx context.Context, id int64) error

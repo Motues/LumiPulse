@@ -120,6 +120,27 @@ func (h *Handler) DeleteService(c *gin.Context) {
 	})
 }
 
+// AdminReorderServices 批量调整服务排序
+func (h *Handler) AdminReorderServices(c *gin.Context) {
+	var req model.ReorderServicesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Invalid request body"})
+		return
+	}
+
+	for _, item := range req.Services {
+		if err := h.Repo.UpdateServiceSortOrder(c.Request.Context(), item.ID, item.SortOrder); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to reorder services"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "Services reordered",
+	})
+}
+
 // AdminListServices 获取所有服务列表（管理员用，含详细信息和在线率）
 func (h *Handler) AdminListServices(c *gin.Context) {
 	services, err := h.Repo.ListServices(c.Request.Context())

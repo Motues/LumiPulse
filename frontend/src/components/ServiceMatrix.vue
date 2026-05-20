@@ -19,6 +19,13 @@ function lerpColor(a: typeof GREEN, b: typeof GREEN, t: number): string {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${bl.toString(16).padStart(2, '0')}`
 }
 
+function getUptimeColor(uptime: number): string {
+  if (uptime >= 99.9) return `#${GREEN.r.toString(16).padStart(2, '0')}${GREEN.g.toString(16).padStart(2, '0')}${GREEN.b.toString(16).padStart(2, '0')}`
+  if (uptime >= 90) return lerpColor(GREEN, YELLOW, (99.9 - uptime) / 9.9)
+  if (uptime >= 80) return lerpColor(YELLOW, RED, (90 - uptime) / 10)
+  return `#${RED.r.toString(16).padStart(2, '0')}${RED.g.toString(16).padStart(2, '0')}${RED.b.toString(16).padStart(2, '0')}`
+}
+
 function getColorForDowntime(down: number): string {
   if (down === -1) return 'var(--matrix-no-data, #e5e7eb)'
   if (down === 0) return `#${GREEN.r.toString(16).padStart(2, '0')}${GREEN.g.toString(16).padStart(2, '0')}${GREEN.b.toString(16).padStart(2, '0')}`
@@ -123,7 +130,7 @@ function timeText(minutes: number): string {
     <div v-if="!hideLegend" class="flex items-center text-xs font-medium mt-1 tracking-tight">
       <span class="flex-shrink-0 text-gray-400 dark:text-gray-500">{{ days.length }} 天前</span>
       <span class="flex-1 mx-2 h-px bg-gray-300 dark:bg-gray-700" />
-      <span class="font-semibold flex-shrink-0" :class="uptime >= 99.9 ? 'text-emerald-600 dark:text-emerald-400' : uptime >= 95 ? 'text-gray-500 dark:text-gray-400' : 'text-red-500 dark:text-red-400'">{{ uptime.toFixed(1) }}% 在线率</span>
+      <span class="font-semibold flex-shrink-0" :style="{ color: getUptimeColor(uptime) }">{{ uptime.toFixed(1) }}% 在线率</span>
       <span class="flex-1 mx-2 h-px bg-gray-300 dark:bg-gray-700" />
       <span class="flex-shrink-0 text-gray-400 dark:text-gray-500">今天</span>
     </div>

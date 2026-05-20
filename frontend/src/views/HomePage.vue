@@ -48,6 +48,23 @@ function formatDateTime(iso: string): string {
   return `${formatDate(iso)} ${formatTime(iso)}`
 }
 
+function affectedServiceNames(ids: string): string {
+  if (!ids || !summary.value) return '-'
+  return ids.split(',').map(id => {
+    const svc = summary.value!.services.find(s => s.id === Number(id))
+    return svc ? svc.name : id
+  }).join(', ')
+}
+
+function isServiceInMaintenance(serviceId: number): boolean {
+  if (!summary.value?.maintenances) return false
+  return summary.value.maintenances.some(m =>
+    m.status === 'in_progress' &&
+    m.affectedServices &&
+    m.affectedServices.split(',').map(Number).includes(serviceId)
+  )
+}
+
 function openUrl(url: string) {
   window.open(url, '_blank')
 }
@@ -154,9 +171,15 @@ onMounted(async () => {
       <section v-if="summary.maintenances && summary.maintenances.length > 0" class="bg-[#fafafa] dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-700 p-6 mb-8">
         <div>
           <h3 class="text-base font-bold text-gray-900 dark:text-gray-100 mb-2">维护计划</h3>
-          <div v-for="m in summary.maintenances" :key="m.id" class="mb-2 last:mb-0">
+          <div v-for="m in summary.maintenances" :key="m.id" class="mb-3 last:mb-0 pb-3 last:pb-0 border-b last:border-b-0 border-gray-100 dark:border-gray-700">
             <p class="text-sm text-gray-800 dark:text-gray-200 font-medium">{{ m.title }}</p>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ formatDateTime(m.scheduledStart) }} - {{ formatDateTime(m.scheduledEnd) }}</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              {{ formatDateTime(m.scheduledStart) }} CST - {{ formatDateTime(m.scheduledEnd) }} CST
+            </p>
+            <p v-if="m.description" class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ m.description }}</p>
+            <p v-if="m.affectedServices" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              受影响服务：{{ affectedServiceNames(m.affectedServices) }}
+            </p>
           </div>
         </div>
       </section>
@@ -195,12 +218,14 @@ onMounted(async () => {
                 </span>
               </div>
               <div class="flex items-center gap-1.5 text-sm font-medium" :class="{
-                'text-[#45ba65] dark:text-[#4ade80]': svc.status === 'operational',
+                'text-[#45ba65] dark:text-[#4ade80]': svc.status === 'operational' && !isServiceInMaintenance(svc.id),
                 'text-[#f9ac05] dark:text-[#fbbf24]': svc.status === 'degraded',
                 'text-[#df2d2a] dark:text-[#f87171]': svc.status === 'outage',
+                'text-gray-400 dark:text-gray-500': isServiceInMaintenance(svc.id),
               }">
-                <div class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[svc.status] }"></div>
-                {{ statusText[svc.status] }}
+                <div v-if="isServiceInMaintenance(svc.id)" class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500"></div>
+                <div v-else class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[svc.status] }"></div>
+                {{ isServiceInMaintenance(svc.id) ? '维护中' : statusText[svc.status] }}
               </div>
             </div>
             <ServiceMatrix :days="getServiceDays(svc.id)" :uptime="svc.uptime" />

@@ -46,6 +46,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 			// Services
 			auth.GET("/services", h.AdminListServices)
 			auth.POST("/services", h.CreateService)
+			auth.PUT("/services/reorder", h.AdminReorderServices)
 			auth.PUT("/services/:id", h.UpdateService)
 			auth.DELETE("/services/:id", h.DeleteService)
 

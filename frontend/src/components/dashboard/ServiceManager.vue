@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { api } from '../../api/client'
 import type { ServiceDetail } from '../../api/types'
 import { useToast } from '../../composables/useToast'
+import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
 
 const { show: toast } = useToast()
 
@@ -11,6 +12,7 @@ const loading = ref(true)
 const showForm = ref(false)
 const editing = ref<ServiceDetail | null>(null)
 const form = ref({ name: '', url: '', description: '', type: 'http', interval: 60 })
+const dragIndex = ref<number | null>(null)
 
 const statusClass = (s: string) => {
   switch (s) {
@@ -33,9 +35,14 @@ async function load() {
   }
 }
 
+const { markClean: cleanSvc, handleClose: closeSvc, restoreFromStorage: restoreSvc } = useUnsavedChanges(form as any, 'svc_form')
+
 function openCreate() {
   editing.value = null
-  form.value = { name: '', url: '', description: '', type: 'http', interval: 60 }
+  const defaults = { name: '', url: '', description: '', type: 'http', interval: 60 }
+  form.value = { ...defaults }
+  restoreSvc()
+  cleanSvc()
   showForm.value = true
 }
 
@@ -48,7 +55,12 @@ function openEdit(svc: ServiceDetail) {
     type: svc.type,
     interval: svc.interval,
   }
+  cleanSvc()
   showForm.value = true
+}
+
+function handleCloseSvc() {
+  if (closeSvc()) showForm.value = false
 }
 
 async function save() {
@@ -59,6 +71,7 @@ async function save() {
       await api.createService(form.value)
     }
     showForm.value = false
+    cleanSvc()
     toast(editing.value ? '更新成功' : '创建成功', 'success')
     load()
   } catch (e: any) {
@@ -74,6 +87,49 @@ async function remove(id: number) {
     load()
   } catch (e: any) {
     toast(e.message || '删除失败')
+  }
+}
+
+async function moveUp(index: number) {
+  if (index <= 0) return
+  const tmp = services.value[index]
+  services.value[index] = services.value[index - 1]
+  services.value[index - 1] = tmp
+  await saveOrder()
+}
+
+async function moveDown(index: number) {
+  if (index >= services.value.length - 1) return
+  const tmp = services.value[index]
+  services.value[index] = services.value[index + 1]
+  services.value[index + 1] = tmp
+  await saveOrder()
+}
+
+function onDragStart(index: number) {
+  dragIndex.value = index
+}
+
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
+}
+
+function onDrop(index: number) {
+  if (dragIndex.value === null || dragIndex.value === index) return
+  const item = services.value.splice(dragIndex.value, 1)[0]
+  services.value.splice(index, 0, item)
+  dragIndex.value = null
+  saveOrder()
+}
+
+async function saveOrder() {
+  const order = services.value.map((svc, i) => ({ id: svc.id, sortOrder: i }))
+  try {
+    await api.reorderServices(order)
+    toast('排序已保存', 'success')
+  } catch (e: any) {
+    toast(e.message || '保存排序失败')
+    load()
   }
 }
 
@@ -97,6 +153,7 @@ onMounted(load)
         <table class="w-full text-left text-sm">
         <thead class="text-xs text-gray-400 dark:text-gray-500 bg-gray-50/50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
           <tr>
+            <th class="px-2 py-3 w-6"></th>
             <th class="px-6 py-3 font-medium">名称</th>
             <th class="px-6 py-3 font-medium">URL</th>
             <th class="px-6 py-3 font-medium">类型</th>
@@ -107,7 +164,18 @@ onMounted(load)
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-50 dark:divide-gray-800">
-          <tr v-for="svc in services" :key="svc.id" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
+          <tr
+            v-for="(svc, idx) in services" :key="svc.id"
+            :draggable="true"
+            @dragstart="onDragStart(idx)"
+            @dragover="onDragOver"
+            @drop="onDrop(idx)"
+            class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50"
+            :class="{ 'opacity-50': dragIndex === idx }"
+          >
+            <td class="px-2 py-4 cursor-grab text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6h2v2H8V6zm6 0h2v2h-2V6zM8 11h2v2H8v-2zm6 0h2v2h-2v-2zm-6 5h2v2H8v-2zm6 0h2v2h-2v-2z"/></svg>
+            </td>
             <td class="px-6 py-4 font-bold text-gray-900 dark:text-gray-100">{{ svc.name }}</td>
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400 max-w-[200px] truncate">{{ svc.url }}</td>
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400">{{ svc.type }}</td>
@@ -118,8 +186,14 @@ onMounted(load)
             </td>
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400">{{ svc.uptime.toFixed(2) }}%</td>
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400">{{ svc.latency }}ms</td>
-            <td class="px-6 py-4 text-right">
-              <button @click="openEdit(svc)" class="text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors mr-3" title="编辑">
+            <td class="px-6 py-4 text-right whitespace-nowrap">
+              <button @click="moveUp(idx)" :disabled="idx === 0" class="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors mr-1 disabled:opacity-30 disabled:cursor-not-allowed" title="上移">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>
+              </button>
+              <button @click="moveDown(idx)" :disabled="idx === services.length - 1" class="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors mr-2 disabled:opacity-30 disabled:cursor-not-allowed" title="下移">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              <button @click="openEdit(svc)" class="text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors mr-2" title="编辑">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
@@ -137,7 +211,7 @@ onMounted(load)
     </div>
 
     <!-- Form Modal -->
-    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showForm = false">
+    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseSvc">
       <div class="bg-white dark:bg-gray-900 rounded-xl p-4 md:p-6 w-full max-w-lg mx-4 shadow-xl">
         <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">{{ editing ? '编辑服务' : '添加服务' }}</h3>
         <div class="space-y-4">
@@ -169,7 +243,7 @@ onMounted(load)
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="showForm = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
+          <button @click="handleCloseSvc" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
           <button @click="save" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
         </div>
       </div>

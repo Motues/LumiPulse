@@ -53,6 +53,13 @@ func (r *repo) UpdateService(ctx context.Context, s *model.Service) error {
 	return nil
 }
 
+func (r *repo) UpdateServiceSortOrder(ctx context.Context, id int64, sortOrder int) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	query := `UPDATE Service SET sort_order=?, updated_at=? WHERE id=?`
+	_, err := r.db.ExecContext(ctx, query, sortOrder, now, id)
+	return err
+}
+
 func (r *repo) DeleteService(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM Service WHERE id = ?", id)
 	return err
@@ -118,10 +125,10 @@ func (r *repo) ListHeartbeats(ctx context.Context, serviceID int64, statusFilter
 	offset := (page - 1) * limit
 	fetchArgs := append([]interface{}{}, args...)
 	query := `SELECT h.id, h.service_id, h.status, h.latency, h.message, h.created_at,
-	          COALESCE(s.name, '') as service_name
-	          FROM Heartbeat h
-	          LEFT JOIN Service s ON h.service_id = s.id
-	          ` + where + ` ORDER BY h.created_at DESC LIMIT ? OFFSET ?`
+			  COALESCE(s.name, '') as service_name
+			  FROM Heartbeat h
+			  LEFT JOIN Service s ON h.service_id = s.id
+			  ` + where + ` ORDER BY h.created_at DESC LIMIT ? OFFSET ?`
 	fetchArgs = append(fetchArgs, limit, offset)
 
 	var entries []*model.LogEntry

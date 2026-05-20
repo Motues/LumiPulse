@@ -24,6 +24,12 @@ function getServiceDays(serviceId: number): [number, number, number][] {
   return dailyStats.value.get(serviceId) || []
 }
 
+function formatCST(iso: string): string {
+  if (!iso) return ''
+  const s = /[Z+-]/.test(iso) ? iso : iso + '+08:00'
+  return new Date(s).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 const statusClass = (s: string) => {
   switch (s) {
     case 'operational': return 'text-emerald-600 bg-emerald-50 border-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/30 dark:border-emerald-800'
@@ -175,7 +181,7 @@ onMounted(async () => {
           <template v-if="activeMaintenances.length > 0">
             <div v-for="m in activeMaintenances" :key="m.id" class="py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
               <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ m.title }}</div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ new Date(m.scheduledStart).toLocaleString('zh-CN') }} - {{ new Date(m.scheduledEnd).toLocaleString('zh-CN') }}</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ formatCST(m.scheduledStart) }} - {{ formatCST(m.scheduledEnd) }}</div>
             </div>
           </template>
           <div v-else class="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">暂无维护计划</div>

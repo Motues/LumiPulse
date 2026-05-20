@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api } from '../../api/client'
 import type { Maintenance, Service } from '../../api/types'
 import { useToast } from '../../composables/useToast'
+import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
 
 const maintenances = ref<Maintenance[]>([])
 const loading = ref(true)
@@ -10,6 +11,23 @@ const { show: toast } = useToast()
 const showForm = ref(false)
 const editing = ref<Maintenance | null>(null)
 const form = ref({ title: '', description: '', scheduledStart: '', scheduledEnd: '', status: 'scheduled', affectedServices: '' })
+
+const { markClean: cleanMtn, handleClose: closeMtn, restoreFromStorage: restoreMtn } = useUnsavedChanges(form as any, 'mtn_form')
+
+// Timezone helpers: assume all times are CST (UTC+8)
+function toCSTISO(dt: string): string {
+  if (!dt) return ''
+  // datetime-local gives "2026-05-20T19:00" (local time without seconds)
+  // Append seconds and CST offset to make it unambiguous
+  return dt + ':00+08:00'
+}
+
+function formatCST(iso: string): string {
+  if (!iso) return ''
+  // If no timezone info in the string, assume CST
+  const s = /[Z+-]/.test(iso) ? iso : iso + '+08:00'
+  return new Date(s).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 // Service multi-select
 const services = ref<(Service & { uptime: number; latency: number })[]>([])
@@ -85,9 +103,12 @@ async function loadServices() {
 
 function openCreate() {
   editing.value = null
-  form.value = { title: '', description: '', scheduledStart: '', scheduledEnd: '', status: 'scheduled', affectedServices: '' }
+  const defaults = { title: '', description: '', scheduledStart: '', scheduledEnd: '', status: 'scheduled', affectedServices: '' }
+  form.value = { ...defaults }
   selectedServices.value = []
   serviceSearch.value = ''
+  restoreMtn()
+  cleanMtn()
   showForm.value = true
 }
 
@@ -103,18 +124,30 @@ function openEdit(m: Maintenance) {
   }
   selectedServices.value = m.affectedServices ? m.affectedServices.split(',').map(Number) : []
   serviceSearch.value = ''
+  cleanMtn()
   showForm.value = true
+}
+
+function handleCloseMtn() {
+  if (closeMtn()) showForm.value = false
 }
 
 async function save() {
   form.value.affectedServices = selectedServices.value.join(',')
+  // Convert local datetime to explicit CST time for storage
+  const payload = {
+    ...form.value,
+    scheduledStart: toCSTISO(form.value.scheduledStart),
+    scheduledEnd: toCSTISO(form.value.scheduledEnd),
+  }
   try {
     if (editing.value) {
-      await api.updateMaintenance(editing.value.id, form.value)
+      await api.updateMaintenance(editing.value.id, payload)
     } else {
-      await api.createMaintenance(form.value)
+      await api.createMaintenance(payload)
     }
     showForm.value = false
+    cleanMtn()
     toast(editing.value ? '更新成功' : '创建成功', 'success')
     load()
   } catch (e: any) {
@@ -172,8 +205,8 @@ onMounted(() => {
                 {{ statusLabel[m.status] || m.status }}
               </span>
             </td>
-            <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">{{ new Date(m.scheduledStart).toLocaleString('zh-CN') }}</td>
-            <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">{{ new Date(m.scheduledEnd).toLocaleString('zh-CN') }}</td>
+            <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">{{ formatCST(m.scheduledStart) }}</td>
+            <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">{{ formatCST(m.scheduledEnd) }}</td>
             <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400 max-w-40 truncate">{{ affectedServiceNames(m.affectedServices) }}</td>
             <td class="px-6 py-4 text-right">
               <button @click="openEdit(m)" class="text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors mr-3" title="编辑">
@@ -194,7 +227,7 @@ onMounted(() => {
     </div>
 
     <!-- Form Modal -->
-    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showForm = false">
+    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseMtn">
       <div class="bg-white dark:bg-gray-900 rounded-xl p-4 md:p-6 w-full max-w-lg mx-4 shadow-xl">
         <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">{{ editing ? '编辑维护' : '创建维护' }}</h3>
         <div class="space-y-4">
@@ -265,7 +298,7 @@ onMounted(() => {
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="showForm = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
+          <button @click="handleCloseMtn" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">取消</button>
           <button @click="save" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
         </div>
       </div>

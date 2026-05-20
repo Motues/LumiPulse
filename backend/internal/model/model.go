@@ -162,6 +162,14 @@ type UpdateServiceRequest struct {
 	IsActive    *bool  `json:"isActive"`
 	SortOrder   int    `json:"sortOrder"`
 }
+type ReorderServicesRequest struct {
+	Services []ReorderItem `json:"services" binding:"required"`
+}
+type ReorderItem struct {
+	ID        int64 `json:"id"`
+	SortOrder int   `json:"sortOrder"`
+}
+
 type CreateIncidentRequest struct {
 	ServiceID int64  `json:"serviceId" binding:"required"`
 	Title     string `json:"title" binding:"required"`
