@@ -17,6 +17,7 @@ type Repository interface {
 	// Heartbeat
 	CreateHeartbeat(ctx context.Context, h *model.Heartbeat) error
 	GetServiceHistory(ctx context.Context, serviceID int64, days int) ([]*model.Heartbeat, error)
+	GetServiceLatencies(ctx context.Context, serviceID int64, days int) ([]*model.LatencyPoint, error)
 	GetLatestHeartbeat(ctx context.Context, serviceID int64) (*model.Heartbeat, error)
 	ListHeartbeats(ctx context.Context, serviceID int64, statusFilter string, page, limit int) ([]*model.LogEntry, int64, error)
 	DeleteOldHeartbeats(ctx context.Context, before string) error
@@ -34,6 +35,7 @@ type Repository interface {
 	ListIncidents(ctx context.Context, page, limit int) ([]*model.Incident, int64, error)
 	ListActiveIncidents(ctx context.Context) ([]*model.Incident, error)
 	ListServiceIncidents(ctx context.Context, serviceID int64, days int) ([]*model.Incident, error)
+	CountRecentIncidents(ctx context.Context, days int) (total int64, resolved int64, err error)
 	GetActiveIncidentByService(ctx context.Context, serviceID int64) (*model.Incident, error)
 	UpdateIncident(ctx context.Context, inc *model.Incident) error
 	DeleteIncident(ctx context.Context, id int64) error
@@ -42,6 +44,8 @@ type Repository interface {
 	CreateIncidentUpdate(ctx context.Context, u *model.IncidentUpdate) error
 	ListIncidentUpdates(ctx context.Context, incidentID int64) ([]*model.IncidentUpdate, error)
 	BatchListIncidentUpdates(ctx context.Context, incidentIDs []int64) (map[int64][]*model.IncidentUpdate, error)
+	UpdateIncidentUpdate(ctx context.Context, u *model.IncidentUpdate) error
+	DeleteIncidentUpdate(ctx context.Context, id int64) error
 
 	// Maintenance
 	CreateMaintenance(ctx context.Context, m *model.Maintenance) error

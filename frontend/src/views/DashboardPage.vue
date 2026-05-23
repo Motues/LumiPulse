@@ -16,6 +16,7 @@ import SubscriberManager from '../components/dashboard/SubscriberManager.vue'
 
 type Section = 'dashboard' | 'services' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'users' | 'subscribers' | 'notifications' | 'settings' | 'api-keys'
 const activeSection = ref<Section>('dashboard')
+const pendingServiceId = ref<number | undefined>()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 const mobileSidebarOpen = ref(false)
@@ -78,8 +79,9 @@ const pageTitle = computed(() => {
   return ''
 })
 
-function switchSection(s: string) {
+function switchSection(s: string, serviceId?: number) {
   activeSection.value = s as Section
+  pendingServiceId.value = serviceId
   if (isMobile.value) mobileSidebarOpen.value = false
 }
 </script>
@@ -116,7 +118,7 @@ function switchSection(s: string) {
           v-if="activeSection === 'dashboard'"
           @navigate="switchSection"
         />
-        <ServiceManager v-else-if="activeSection === 'services'" />
+        <ServiceManager v-else-if="activeSection === 'services'" :pending-service-id="pendingServiceId" @opened="pendingServiceId = undefined" />
         <IncidentManager v-else-if="activeSection === 'incidents'" />
         <MaintenanceManager v-else-if="activeSection === 'maintenances'" />
         <SettingsPanel v-else-if="activeSection === 'settings'" />

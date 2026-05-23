@@ -12,6 +12,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 		v1.GET("/summary", h.GetSummary)
 		v1.GET("/services", h.ListServices)
 		v1.GET("/services/:id/history", h.GetServiceHistory)
+		v1.GET("/services/:id/latency", h.GetServiceLatency)
 		v1.GET("/services/:id/daily-stats", h.GetDailyStats)
 		v1.GET("/incidents", h.ListIncidents)
 		v1.GET("/maintenances", h.ListMaintenances)
@@ -56,6 +57,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 			auth.GET("/incidents", h.AdminListIncidents)
 			auth.POST("/incidents", h.CreateIncident)
 			auth.POST("/incidents/:id/updates", h.CreateIncidentUpdate)
+			auth.PUT("/incidents/:id/updates/:updateId", h.UpdateIncidentUpdate)
+			auth.DELETE("/incidents/:id/updates/:updateId", h.DeleteIncidentUpdate)
 			auth.PATCH("/incidents/:id", h.UpdateIncident)
 			auth.DELETE("/incidents/:id", h.DeleteIncident)
 

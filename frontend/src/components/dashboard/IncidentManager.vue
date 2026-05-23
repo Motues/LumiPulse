@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { api } from '../../api/client'
 import type { Incident, Service } from '../../api/types'
+import IncidentDetail from './IncidentDetail.vue'
 import { useToast } from '../../composables/useToast'
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
 
@@ -11,6 +12,28 @@ const page = ref(1)
 const totalPage = ref(0)
 const limit = 15
 const { show: toast } = useToast()
+
+// Detail view
+const selectedIncident = ref<Incident | null>(null)
+
+function getServiceName(serviceId: number): string {
+  const svc = services.value.find(s => s.id === serviceId)
+  return svc ? svc.name : ''
+}
+
+function handleDetailUpdated() {
+  load().then(() => {
+    if (selectedIncident.value) {
+      const updated = incidents.value.find(i => i.id === selectedIncident.value!.id)
+      if (updated) selectedIncident.value = updated
+    }
+  })
+}
+
+function handleDetailDeleted() {
+  selectedIncident.value = null
+  load()
+}
 
 // Incident CRUD
 const showForm = ref(false)
@@ -174,6 +197,18 @@ onMounted(() => {
 
 <template>
   <div>
+    <!-- Detail view -->
+    <IncidentDetail
+      v-if="selectedIncident"
+      :incident="selectedIncident"
+      :service-name="getServiceName(selectedIncident.serviceId)"
+      @back="selectedIncident = null"
+      @updated="handleDetailUpdated"
+      @deleted="handleDetailDeleted"
+    />
+
+    <!-- List view -->
+    <template v-else>
     <div class="flex justify-between items-center mb-4">
       <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">事件管理</h2>
       <button @click="openCreate" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-1 transition-colors">
@@ -197,7 +232,7 @@ onMounted(() => {
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-50 dark:divide-gray-800">
-          <tr v-for="inc in incidents" :key="inc.id" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
+          <tr v-for="inc in incidents" :key="inc.id" @click="selectedIncident = inc" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50 cursor-pointer">
             <td class="px-6 py-4 font-bold text-gray-900 dark:text-gray-100">{{ inc.title }}</td>
             <td class="px-6 py-4">
               <span :class="['inline-flex items-center px-2 py-1 rounded text-xs font-medium border', impactClass(inc.impact)]">
@@ -207,17 +242,17 @@ onMounted(() => {
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400">{{ statusLabel[inc.status] || inc.status }}</td>
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400 text-xs">{{ new Date(inc.createdAt).toLocaleString('zh-CN') }}</td>
             <td class="px-6 py-4 text-right">
-              <button @click="openEdit(inc)" class="text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors mr-3" title="编辑">
+              <button @click.stop="openEdit(inc)" class="text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors mr-3" title="编辑">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
               </button>
-              <button @click="openUpdate(inc)" class="text-gray-400 hover:text-green-500 dark:text-gray-500 dark:hover:text-green-400 transition-colors mr-3" title="事件更新">
+              <button @click.stop="openUpdate(inc)" class="text-gray-400 hover:text-green-500 dark:text-gray-500 dark:hover:text-green-400 transition-colors mr-3" title="事件更新">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </button>
-              <button @click="remove(inc.id)" class="text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition-colors" title="删除">
+              <button @click.stop="remove(inc.id)" class="text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition-colors" title="删除">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
@@ -249,6 +284,7 @@ onMounted(() => {
         下一页
       </button>
     </div>
+    </template>
 
     <!-- Incident Form -->
     <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseInc">

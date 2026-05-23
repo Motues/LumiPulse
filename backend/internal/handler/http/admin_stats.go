@@ -8,14 +8,16 @@ import (
 )
 
 type DashboardStats struct {
-	TotalServices      int                   `json:"totalServices"`
-	OperationalCount   int                   `json:"operationalCount"`
-	DegradedCount      int                   `json:"degradedCount"`
-	OutageCount        int                   `json:"outageCount"`
-	ActiveIncidents    int                   `json:"activeIncidents"`
-	ActiveMaintenances int                   `json:"activeMaintenances"`
-	Services           []model.ServiceSummary `json:"services"`
-	RecentIncidents    []*model.Incident     `json:"recentIncidents"`
+	TotalServices           int                   `json:"totalServices"`
+	OperationalCount        int                   `json:"operationalCount"`
+	DegradedCount           int                   `json:"degradedCount"`
+	OutageCount             int                   `json:"outageCount"`
+	ActiveIncidents         int                   `json:"activeIncidents"`
+	ActiveMaintenances      int                   `json:"activeMaintenances"`
+	Services                []model.ServiceSummary `json:"services"`
+	RecentIncidents         []*model.Incident     `json:"recentIncidents"`
+	RecentIncidentsTotal    int64                 `json:"recentIncidentsTotal"`
+	RecentIncidentsResolved int64                 `json:"recentIncidentsResolved"`
 }
 
 func (h *Handler) AdminStats(c *gin.Context) {
@@ -30,6 +32,7 @@ func (h *Handler) AdminStats(c *gin.Context) {
 		activeIncidents = []*model.Incident{}
 	}
 	activeMaints, _ := h.Repo.ListActiveMaintenances(c.Request.Context())
+	recentTotal, recentResolved, _ := h.Repo.CountRecentIncidents(c.Request.Context(), 30)
 
 	total := len(services)
 	operational := 0
@@ -86,9 +89,11 @@ func (h *Handler) AdminStats(c *gin.Context) {
 			DegradedCount:      degraded,
 			OutageCount:        outage,
 			ActiveIncidents:    significantCount,
-			ActiveMaintenances: len(activeMaints),
-			Services:           summaries,
-			RecentIncidents:    activeIncidents,
+			ActiveMaintenances:      len(activeMaints),
+			Services:                summaries,
+			RecentIncidents:         activeIncidents,
+			RecentIncidentsTotal:    recentTotal,
+			RecentIncidentsResolved: recentResolved,
 		},
 	})
 }

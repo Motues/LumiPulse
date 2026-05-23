@@ -122,6 +122,58 @@ func (h *Handler) CreateIncidentUpdate(c *gin.Context) {
 	})
 }
 
+// UpdateIncidentUpdate 修改事件更新记录
+func (h *Handler) UpdateIncidentUpdate(c *gin.Context) {
+	updateIDStr := c.Param("updateId")
+	updateID, err := strconv.ParseInt(updateIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Invalid update id"})
+		return
+	}
+
+	var req model.CreateIncidentUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Invalid request body"})
+		return
+	}
+
+	update := &model.IncidentUpdate{
+		ID:      updateID,
+		Status:  req.Status,
+		Content: req.Content,
+	}
+
+	if err := h.Repo.UpdateIncidentUpdate(c.Request.Context(), update); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to update"})
+		return
+	}
+
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "Incident update modified",
+	})
+}
+
+// DeleteIncidentUpdate 删除事件更新记录
+func (h *Handler) DeleteIncidentUpdate(c *gin.Context) {
+	updateIDStr := c.Param("updateId")
+	updateID, err := strconv.ParseInt(updateIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Invalid update id"})
+		return
+	}
+
+	if err := h.Repo.DeleteIncidentUpdate(c.Request.Context(), updateID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete"})
+		return
+	}
+
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "Incident update deleted",
+	})
+}
+
 // UpdateIncident 更改故障级别或标记为已解决
 func (h *Handler) UpdateIncident(c *gin.Context) {
 	idStr := c.Param("id")

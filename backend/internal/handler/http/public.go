@@ -287,6 +287,34 @@ func (h *Handler) GetServiceHistory(c *gin.Context) {
 	})
 }
 
+// GetServiceLatency 获取服务轻量延迟数据（仅 latency 和 createdAt）
+func (h *Handler) GetServiceLatency(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Invalid service id"})
+		return
+	}
+
+	days := 1
+	if d := c.Query("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= 30 {
+			days = parsed
+		}
+	}
+
+	points, err := h.Repo.GetServiceLatencies(c.Request.Context(), id, days)
+	if err != nil {
+		points = []*model.LatencyPoint{}
+	}
+
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "ok",
+		Data:    points,
+	})
+}
+
 // ListIncidents 获取最近的故障事件列表（分页）
 func (h *Handler) ListIncidents(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))

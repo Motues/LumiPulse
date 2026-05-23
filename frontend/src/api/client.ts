@@ -45,6 +45,8 @@ export const api = {
   getSummary: () => request<ApiResponse<import('./types').SummaryResponse>>('GET', '/summary'),
   getServiceHistory: (id: number, days = 90) =>
     request<ApiResponse<import('./types').ServiceHistoryResponse>>('GET', `/services/${id}/history?days=${days}`),
+  getServiceLatency: (id: number, days = 1) =>
+    request<ApiResponse<{ latency: number; createdAt: string }[]>>('GET', `/services/${id}/latency?days=${days}`),
   getPublicIncidents: (page = 1, limit = 20) =>
     request<ApiResponse<{ incidents: import('./types').Incident[]; pagination: import('./types').Pagination }>>('GET', `/incidents?page=${page}&limit=${limit}`),
   getMaintenances: () => request<ApiResponse<import('./types').Maintenance[]>>('GET', '/maintenances'),
@@ -109,6 +111,10 @@ export const api = {
     request<ApiResponse<void>>('DELETE', `/admin/incidents/${id}`, undefined, true),
   createIncidentUpdate: (id: number, data: any) =>
     request<ApiResponse<import('./types').IncidentUpdate>>('POST', `/admin/incidents/${id}/updates`, data, true),
+  updateIncidentUpdate: (incidentId: number, updateId: number, data: any) =>
+    request<ApiResponse<void>>('PUT', `/admin/incidents/${incidentId}/updates/${updateId}`, data, true),
+  deleteIncidentUpdate: (incidentId: number, updateId: number) =>
+    request<ApiResponse<void>>('DELETE', `/admin/incidents/${incidentId}/updates/${updateId}`, undefined, true),
 
   // Admin - ApiKeys
   getApiKeys: () =>

@@ -89,6 +89,8 @@ export interface DashboardStats {
   activeMaintenances: number
   services: ServiceSummary[]
   recentIncidents: Incident[]
+  recentIncidentsTotal: number
+  recentIncidentsResolved: number
 }
 
 export interface Pagination {

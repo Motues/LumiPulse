@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../api/client'
-import type { SummaryResponse, Incident } from '../api/types'
+import type { SummaryResponse, Incident, ServiceSummary } from '../api/types'
 import ServiceMatrix from '../components/ServiceMatrix.vue'
+import PublicServiceDetail from '../components/PublicServiceDetail.vue'
 import { siteName, siteIcon, emailEnabled } from '../composables/useSiteConfig'
 import { useDarkMode } from '../composables/useDarkMode'
 
@@ -107,6 +108,7 @@ function openUrl(url: string) {
 const dailyStats = ref<Map<number, [number, number, number][]>>(new Map())
 const isMobile = ref(false)
 const hoveredSvcId = ref<number | null>(null)
+const selectedService = ref<ServiceSummary | null>(null)
 
 function getServiceDays(serviceId: number): [number, number, number][] {
   return dailyStats.value.get(serviceId) || []
@@ -222,17 +224,29 @@ onUnmounted(() => {
         </div>
       </section>
 
+      <!-- Service Detail (when a service is selected) -->
+      <PublicServiceDetail
+        v-if="selectedService"
+        :service="selectedService"
+        :daily-days="getServiceDays(selectedService.id)"
+        @back="selectedService = null"
+      />
+
       <!-- Service Status -->
-      <section class="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 mb-8 pb-4">
+      <section v-else class="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 mb-8 pb-4">
         <div class="flex items-center justify-between p-6 border-b border-gray-50 dark:border-gray-800 mb-4">
           <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">系统状态</h2>
         </div>
 
         <template v-for="(svc, idx) in summary.services" :key="svc.id">
-          <div class="px-6 pb-6" :class="{ 'pt-4': idx > 0 }">
+          <div
+            class="px-6 pb-6 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/50 rounded-lg transition-colors"
+            :class="{ 'pt-4': idx > 0 }"
+            @click="selectedService = svc"
+          >
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center">
-                <span class="font-bold text-gray-900 dark:text-gray-100 leading-none">{{ svc.name }}</span>
+                <span class="font-bold text-gray-900 dark:text-gray-100 leading-none hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">{{ svc.name }}</span>
                 <span
                   v-if="svc.url"
                   class="relative inline-flex items-center ml-1"
@@ -242,7 +256,7 @@ onUnmounted(() => {
                   <svg
                     class="w-4 h-4 text-gray-400 dark:text-gray-500 hover:text-emerald-500 dark:hover:text-emerald-400 cursor-pointer transition-colors"
                     fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"
-                    @click="openUrl(svc.url)"
+                    @click.stop="openUrl(svc.url)"
                   >
                     <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                   </svg>

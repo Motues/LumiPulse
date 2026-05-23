@@ -131,7 +131,7 @@ function onItemLeave(e: MouseEvent) {
             target="_blank"
             rel="noopener noreferrer"
             class="hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors"
-          >Powered By {{ siteName }}</a>
+          >Powered By LumiPulse</a>
         </div>
         <button
           @click="toggleDark"

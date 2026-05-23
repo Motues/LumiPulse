@@ -6,7 +6,7 @@ import ServiceMatrix from '../ServiceMatrix.vue'
 import { useToast } from '../../composables/useToast'
 
 const emit = defineEmits<{
-  navigate: [section: string]
+  navigate: [section: string, serviceId?: number]
 }>()
 
 const { show: toast } = useToast()
@@ -19,6 +19,19 @@ const maintenances = ref<Maintenance[]>([])
 const activeMaintenances = computed(() =>
   maintenances.value.filter(m => m.status === 'scheduled' || m.status === 'in_progress')
 )
+
+const overallUptime = computed(() => {
+  if (!stats.value || stats.value.services.length === 0) return 0
+  const total = stats.value.services.reduce((sum, s) => sum + s.uptime, 0)
+  return total / stats.value.services.length
+})
+
+const avgLatency = computed(() => {
+  if (!stats.value) return 0
+  const withData = stats.value.services.filter(s => s.latency > 0)
+  if (withData.length === 0) return 0
+  return Math.round(withData.reduce((sum, s) => sum + s.latency, 0) / withData.length)
+})
 
 function getServiceDays(serviceId: number): [number, number, number][] {
   return dailyStats.value.get(serviceId) || []
@@ -73,7 +86,7 @@ onMounted(async () => {
     <div v-if="loading" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
 
     <template v-if="stats">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-5">
         <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
           <div>
             <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">服务总数</div>
@@ -83,7 +96,7 @@ onMounted(async () => {
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
           </div>
         </div>
-        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-5 flex justify-between items-center shadow-sm">
+        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
           <div>
             <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">正常运行</div>
             <div class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">{{ stats.operationalCount }}</div>
@@ -92,7 +105,7 @@ onMounted(async () => {
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
         </div>
-        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-5 flex justify-between items-center shadow-sm">
+        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
           <div>
             <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">发生故障</div>
             <div class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">{{ stats.outageCount + stats.degradedCount }}</div>
@@ -101,13 +114,57 @@ onMounted(async () => {
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
           </div>
         </div>
-        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-5 flex justify-between items-center shadow-sm">
+        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
           <div>
             <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">维护中</div>
             <div class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">{{ stats.activeMaintenances }}</div>
           </div>
-          <div class="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-500 dark:text-amber-400 flex items-center justify-center">
+          <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-500 dark:text-amber-400 flex items-center justify-center">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg>
+          </div>
+        </div>
+        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
+          <div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">整体在线率</div>
+            <div class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">{{ overallUptime.toFixed(1) }}%</div>
+          </div>
+          <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-cyan-50 dark:bg-cyan-900/30 text-cyan-500 dark:text-cyan-400 flex items-center justify-center">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
+          </div>
+        </div>
+        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
+          <div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">平均响应</div>
+            <div class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">{{ avgLatency }}ms</div>
+          </div>
+          <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-purple-50 dark:bg-purple-900/30 text-purple-500 dark:text-purple-400 flex items-center justify-center">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- 近30天事件趋势 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-5 mt-3 md:mt-5">
+        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
+          <div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">近30天事件</div>
+            <div class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">{{ stats.recentIncidentsTotal }}</div>
+            <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">已解决 {{ stats.recentIncidentsResolved }}</div>
+          </div>
+          <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-500 dark:text-indigo-400 flex items-center justify-center">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13h4v8H3zM10 9h4v12h-4zM17 5h4v16h-4z" /></svg>
+          </div>
+        </div>
+        <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 md:p-5 flex justify-between items-center shadow-sm">
+          <div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">解决率</div>
+            <div class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
+              {{ stats.recentIncidentsTotal > 0 ? ((stats.recentIncidentsResolved / stats.recentIncidentsTotal) * 100).toFixed(0) + '%' : 'N/A' }}
+            </div>
+            <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">近30天</div>
+          </div>
+          <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-500 dark:text-teal-400 flex items-center justify-center">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
         </div>
       </div>
@@ -131,7 +188,7 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50 dark:divide-gray-800">
-            <tr v-for="svc in stats.services" :key="svc.id" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
+            <tr v-for="svc in stats.services" :key="svc.id" @click="emit('navigate', 'services', svc.id)" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50 cursor-pointer">
               <td class="px-6 py-4 font-bold text-gray-900 dark:text-gray-100">{{ svc.name }}</td>
               <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400 max-w-[200px] truncate" :title="svc.url">{{ svc.url || '-' }}</td>
               <td class="px-6 py-4 text-gray-500 dark:text-gray-400">{{ { http: 'HTTP', tcp: 'TCP', ping: 'Ping' }[svc.type] || svc.type }}</td>
@@ -160,9 +217,12 @@ onMounted(async () => {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-6">
         <!-- Incidents card -->
         <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-5 shadow-sm">
-          <h3 class="font-bold text-gray-900 dark:text-gray-100 mb-4">活跃事件</h3>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-bold text-gray-900 dark:text-gray-100">活跃事件</h3>
+            <button @click="emit('navigate', 'incidents')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">管理</button>
+          </div>
           <template v-if="stats.recentIncidents && stats.recentIncidents.length > 0">
-            <div v-for="inc in stats.recentIncidents" :key="inc.id" class="flex items-start gap-3 py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+            <div v-for="inc in stats.recentIncidents" :key="inc.id" @click="emit('navigate', 'incidents')" class="flex items-start gap-3 py-2 border-b border-gray-50 dark:border-gray-800 last:border-0 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/50 rounded-lg px-2 -mx-2">
               <div :class="['w-2 h-2 rounded-full mt-2',
                 inc.impact === 'critical' ? 'bg-red-500' : inc.impact === 'major' ? 'bg-orange-500' : 'bg-yellow-400'
               ]" />
@@ -177,9 +237,12 @@ onMounted(async () => {
 
         <!-- Maintenance card -->
         <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-5 shadow-sm">
-          <h3 class="font-bold text-gray-900 dark:text-gray-100 mb-4">维护计划</h3>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-bold text-gray-900 dark:text-gray-100">维护计划</h3>
+            <button @click="emit('navigate', 'maintenances')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">管理</button>
+          </div>
           <template v-if="activeMaintenances.length > 0">
-            <div v-for="m in activeMaintenances" :key="m.id" class="py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+            <div v-for="m in activeMaintenances" :key="m.id" @click="emit('navigate', 'maintenances')" class="py-2 border-b border-gray-50 dark:border-gray-800 last:border-0 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/50 rounded-lg px-2 -mx-2">
               <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ m.title }}</div>
               <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ formatCST(m.scheduledStart) }} - {{ formatCST(m.scheduledEnd) }}</div>
             </div>

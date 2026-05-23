@@ -22,6 +22,13 @@ type Heartbeat struct {
 	Message   string `db:"message" json:"message,omitempty"` // error detail or response summary
 	CreatedAt string `db:"created_at" json:"createdAt"`
 }
+
+// LatencyPoint 轻量延迟数据点
+type LatencyPoint struct {
+	Latency   int    `db:"latency" json:"latency"`
+	CreatedAt string `db:"created_at" json:"createdAt"`
+}
+
 // Incident 故障事件
 type Incident struct {
 	ID        int64  `db:"id" json:"id"`

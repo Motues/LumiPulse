@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '../../api/client'
 import type { ServiceDetail } from '../../api/types'
+import ServiceDetailComponent from './ServiceDetail.vue'
 import { useToast } from '../../composables/useToast'
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
+
+const props = defineProps<{
+  pendingServiceId?: number
+}>()
+
+const emit = defineEmits<{
+  opened: []
+}>()
 
 const { show: toast } = useToast()
 
@@ -14,6 +23,9 @@ const editing = ref<ServiceDetail | null>(null)
 const form = ref({ name: '', url: '', description: '', type: 'http', interval: 60 })
 const dragIndex = ref<number | null>(null)
 const searchQuery = ref('')
+
+// Detail view
+const selectedService = ref<ServiceDetail | null>(null)
 
 const filteredServices = computed(() => {
   const q = searchQuery.value.toLowerCase().trim()
@@ -39,6 +51,13 @@ async function load() {
   try {
     const res = await api.getAdminServices()
     services.value = res.data
+    if (props.pendingServiceId) {
+      const svc = services.value.find(s => s.id === props.pendingServiceId)
+      if (svc) {
+        selectedService.value = svc
+        emit('opened')
+      }
+    }
   } catch (e: any) {
     toast(e.message || '加载失败')
   } finally {
@@ -145,10 +164,29 @@ async function saveOrder() {
 }
 
 onMounted(load)
+
+watch(() => props.pendingServiceId, (id) => {
+  if (id && services.value.length > 0) {
+    const svc = services.value.find(s => s.id === id)
+    if (svc) {
+      selectedService.value = svc
+      emit('opened')
+    }
+  }
+})
 </script>
 
 <template>
   <div>
+    <!-- Detail view -->
+    <ServiceDetailComponent
+      v-if="selectedService"
+      :service="selectedService"
+      @back="selectedService = null"
+    />
+
+    <!-- List view -->
+    <template v-else>
     <div class="flex justify-between items-center mb-4">
       <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">服务管理</h2>
       <button @click="openCreate" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-1 transition-colors">
@@ -197,7 +235,7 @@ onMounted(load)
             <td class="px-2 py-4 cursor-grab text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400">
               <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6h2v2H8V6zm6 0h2v2h-2V6zM8 11h2v2H8v-2zm6 0h2v2h-2v-2zm-6 5h2v2H8v-2zm6 0h2v2h-2v-2z"/></svg>
             </td>
-            <td class="px-6 py-4 font-bold text-gray-900 dark:text-gray-100">{{ svc.name }}</td>
+            <td class="px-6 py-4 font-bold text-gray-900 dark:text-gray-100 cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400" @click="selectedService = svc">{{ svc.name }}</td>
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400 max-w-[200px] truncate">{{ svc.url }}</td>
             <td class="px-6 py-4 text-gray-500 dark:text-gray-400">{{ svc.type }}</td>
             <td class="px-6 py-4">
@@ -230,6 +268,7 @@ onMounted(load)
       </table>
         </div>
     </div>
+    </template>
 
     <!-- Form Modal -->
     <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseSvc">

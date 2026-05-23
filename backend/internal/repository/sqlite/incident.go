@@ -67,6 +67,19 @@ func (r *repo) ListServiceIncidents(ctx context.Context, serviceID int64, days i
 	return incidents, err
 }
 
+func (r *repo) CountRecentIncidents(ctx context.Context, days int) (int64, int64, error) {
+	since := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	var total int64
+	if err := r.db.GetContext(ctx, &total, "SELECT COUNT(*) FROM Incident WHERE created_at >= ?", since); err != nil {
+		return 0, 0, err
+	}
+	var resolved int64
+	if err := r.db.GetContext(ctx, &resolved, "SELECT COUNT(*) FROM Incident WHERE created_at >= ? AND status = 'resolved'", since); err != nil {
+		return total, 0, err
+	}
+	return total, resolved, nil
+}
+
 func (r *repo) UpdateIncident(ctx context.Context, inc *model.Incident) error {
 	now := time.Now().Format(time.RFC3339)
 	query := `UPDATE Incident SET title=?, impact=?, status=?, updated_at=? WHERE id=?`
@@ -126,4 +139,15 @@ func (r *repo) BatchListIncidentUpdates(ctx context.Context, incidentIDs []int64
 		result[u.IncidentID] = append(result[u.IncidentID], u)
 	}
 	return result, nil
+}
+
+func (r *repo) UpdateIncidentUpdate(ctx context.Context, u *model.IncidentUpdate) error {
+	query := `UPDATE Incident_Update SET status = ?, content = ? WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, u.Status, u.Content, u.ID)
+	return err
+}
+
+func (r *repo) DeleteIncidentUpdate(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM Incident_Update WHERE id = ?", id)
+	return err
 }
