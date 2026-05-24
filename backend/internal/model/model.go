@@ -23,10 +23,12 @@ type Heartbeat struct {
 	CreatedAt string `db:"created_at" json:"createdAt"`
 }
 
-// LatencyPoint 轻量延迟数据点
-type LatencyPoint struct {
-	Latency   int    `db:"latency" json:"latency"`
-	CreatedAt string `db:"created_at" json:"createdAt"`
+// LatencyResponse 紧凑延迟数据响应
+type LatencyResponse struct {
+	Start    string `json:"start"`              // 起始时间 ISO
+	Interval int    `json:"interval"`            // 间隔分钟数
+	Latencies []int  `json:"latencies"`          // 延迟数组 (ms)
+	Statuses  []int  `json:"statuses"`           // 状态数组 (0=正常, 1=故障, -1=无数据)
 }
 
 // Incident 故障事件

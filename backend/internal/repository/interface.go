@@ -17,7 +17,6 @@ type Repository interface {
 	// Heartbeat
 	CreateHeartbeat(ctx context.Context, h *model.Heartbeat) error
 	GetServiceHistory(ctx context.Context, serviceID int64, days int) ([]*model.Heartbeat, error)
-	GetServiceLatencies(ctx context.Context, serviceID int64, days int) ([]*model.LatencyPoint, error)
 	GetLatestHeartbeat(ctx context.Context, serviceID int64) (*model.Heartbeat, error)
 	ListHeartbeats(ctx context.Context, serviceID int64, statusFilter string, page, limit int) ([]*model.LogEntry, int64, error)
 	DeleteOldHeartbeats(ctx context.Context, before string) error

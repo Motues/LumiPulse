@@ -287,7 +287,68 @@ func (h *Handler) GetServiceHistory(c *gin.Context) {
 	})
 }
 
-// GetServiceLatency 获取服务轻量延迟数据（仅 latency 和 createdAt）
+// aggregateLatency 将心跳记录聚合为紧凑的5分钟桶响应
+func aggregateLatency(heartbeats []*model.Heartbeat, days int) model.LatencyResponse {
+	const bucketSize = 5 // 5分钟
+	totalBuckets := (24 * 60 / bucketSize) * days // 288 per day
+
+	now := time.Now().UTC()
+	startTime := now.AddDate(0, 0, -days)
+	startTime = startTime.Truncate(time.Duration(bucketSize) * time.Minute)
+
+	type bucketData struct {
+		totalLatency int64
+		count        int
+		hasFailure   bool
+	}
+
+	buckets := make(map[int]*bucketData)
+	for _, h := range heartbeats {
+		t, err := time.Parse("2006-01-02T15:04:05Z", h.CreatedAt)
+		if err != nil {
+			continue
+		}
+		idx := int(t.Sub(startTime).Minutes()) / bucketSize
+		if idx < 0 || idx >= totalBuckets {
+			continue
+		}
+		bd, ok := buckets[idx]
+		if !ok {
+			bd = &bucketData{}
+			buckets[idx] = bd
+		}
+		bd.totalLatency += int64(h.Latency)
+		bd.count++
+		if h.Status >= 400 {
+			bd.hasFailure = true
+		}
+	}
+
+	latencies := make([]int, totalBuckets)
+	statuses := make([]int, totalBuckets)
+	for i := 0; i < totalBuckets; i++ {
+		bd, ok := buckets[i]
+		if !ok || bd.count == 0 {
+			latencies[i] = 0
+			statuses[i] = -1
+		} else if bd.hasFailure {
+			latencies[i] = int(bd.totalLatency / int64(bd.count))
+			statuses[i] = 1
+		} else {
+			latencies[i] = int(bd.totalLatency / int64(bd.count))
+			statuses[i] = 0
+		}
+	}
+
+	return model.LatencyResponse{
+		Start:     startTime.Format("2006-01-02T15:04:05Z"),
+		Interval:  bucketSize,
+		Latencies: latencies,
+		Statuses:  statuses,
+	}
+}
+
+// GetServiceLatency 获取服务5分钟聚合延迟数据
 func (h *Handler) GetServiceLatency(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -303,15 +364,17 @@ func (h *Handler) GetServiceLatency(c *gin.Context) {
 		}
 	}
 
-	points, err := h.Repo.GetServiceLatencies(c.Request.Context(), id, days)
+	heartbeats, err := h.Repo.GetServiceHistory(c.Request.Context(), id, days)
 	if err != nil {
-		points = []*model.LatencyPoint{}
+		heartbeats = []*model.Heartbeat{}
 	}
+
+	data := aggregateLatency(heartbeats, days)
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "ok",
-		Data:    points,
+		Data:    data,
 	})
 }
 

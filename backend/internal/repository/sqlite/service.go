@@ -91,14 +91,6 @@ func (r *repo) GetServiceHistory(ctx context.Context, serviceID int64, days int)
 	return heartbeats, err
 }
 
-func (r *repo) GetServiceLatencies(ctx context.Context, serviceID int64, days int) ([]*model.LatencyPoint, error) {
-	var points []*model.LatencyPoint
-	since := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02T15:04:05Z")
-	query := `SELECT latency, created_at FROM Heartbeat WHERE service_id = ? AND created_at >= ? ORDER BY created_at ASC`
-	err := r.db.SelectContext(ctx, &points, query, serviceID, since)
-	return points, err
-}
-
 func (r *repo) ListHeartbeats(ctx context.Context, serviceID int64, statusFilter string, page, limit int) ([]*model.LogEntry, int64, error) {
 	conditions := []string{}
 	args := []interface{}{}

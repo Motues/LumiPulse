@@ -46,7 +46,7 @@ export const api = {
   getServiceHistory: (id: number, days = 90) =>
     request<ApiResponse<import('./types').ServiceHistoryResponse>>('GET', `/services/${id}/history?days=${days}`),
   getServiceLatency: (id: number, days = 1) =>
-    request<ApiResponse<{ latency: number; createdAt: string }[]>>('GET', `/services/${id}/latency?days=${days}`),
+    request<ApiResponse<{ start: string; interval: number; latencies: number[]; statuses: number[] }>>('GET', `/services/${id}/latency?days=${days}`),
   getPublicIncidents: (page = 1, limit = 20) =>
     request<ApiResponse<{ incidents: import('./types').Incident[]; pagination: import('./types').Pagination }>>('GET', `/incidents?page=${page}&limit=${limit}`),
   getMaintenances: () => request<ApiResponse<import('./types').Maintenance[]>>('GET', '/maintenances'),

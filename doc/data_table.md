@@ -27,7 +27,7 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
-| `service_id` | INTEGER | REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
+| `service_id` | INTEGER | NOT NULL REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
 | `status` | INTEGER | NOT NULL | 状态码（如 200）或布尔值（1/0） |
 | `latency` | INTEGER | — | 响应延迟（单位：毫秒） |
 | `message` | TEXT | DEFAULT '' | 错误详情或响应摘要 |
@@ -44,7 +44,7 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
-| `service_id` | INTEGER | REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
+| `service_id` | INTEGER | NOT NULL REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
 | `date` | TEXT | NOT NULL | 日期（格式：YYYY-MM-DD） |
 | `uptime_count` | INTEGER | DEFAULT 0 | 成功检查次数 |
 | `downtime_count` | INTEGER | DEFAULT 0 | 失败检查次数 |
@@ -63,14 +63,14 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
-| `service_id` | INTEGER | REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
+| `service_id` | INTEGER | NOT NULL REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
 | `title` | TEXT | NOT NULL | 事件标题 |
 | `impact` | TEXT | NOT NULL | 影响等级：`minor`, `major`, `critical` |
 | `status` | TEXT | DEFAULT 'investigating' | 事件状态：`investigating`, `identified`, `monitoring`, `resolved` |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 事件开始时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
-索引：`idx_incident_status(status)`
+索引：`idx_incident_status(status)`、`idx_incident_service_status(service_id, status)`
 
 ---
 
@@ -109,18 +109,17 @@
 
 ---
 
-## 表：`User`
+## 表：`Subscriber`
 
-用于管理状态页后台的管理员账号。
+用于存储公开订阅服务状态通知的邮箱。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
-| `username` | TEXT | UNIQUE NOT NULL | 用户名 |
-| `password_hash` | TEXT | NOT NULL | 加密后的密码 |
-| `email` | TEXT | UNIQUE NOT NULL | 管理员邮箱 |
-| `last_login` | DATETIME | — | 最后登录时间 |
-| `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
+| `email` | TEXT | UNIQUE NOT NULL | 订阅邮箱地址 |
+| `verified` | INTEGER | DEFAULT 0 | 是否已验证（1 为已验证，0 为未验证） |
+| `created_at` | DATETIME | DEFAULT (datetime('now')) | 订阅时间 |
+| `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
 ---
 

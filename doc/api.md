@@ -35,6 +35,58 @@
 
 用于状态页前端展示，无需鉴权。
 
+### 健康检查
+
+```
+GET /api/v1/health
+```
+
+用于负载均衡和容器编排探针。
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "status": "healthy",
+    "version": "0.1.4"
+  }
+}
+```
+
+---
+
+### 订阅通知
+
+```
+POST /api/v1/subscribe
+```
+
+使用邮箱订阅服务状态通知。
+
+**请求**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**响应**
+
+```json
+{
+  "code": 201,
+  "message": "订阅成功"
+}
+```
+
+邮箱已订阅时返回 200，message 为 `"该邮箱已订阅"`。
+
+---
+
 ### 获取站点配置
 
 ```
@@ -205,6 +257,48 @@ GET /api/v1/services/:id/history?days=90
   }
 }
 ```
+
+---
+
+### 获取服务延迟
+
+```
+GET /api/v1/services/:id/latency?days=1
+```
+
+获取服务延迟数据，返回按 5 分钟聚合的紧凑格式。前端可根据 `start` 和 `interval` 还原每个数据点的时间。
+
+**查询参数**
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `days` | int | 1 | 天数（最大 30） |
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "start": "2026-05-24T00:00:00Z",
+    "interval": 5,
+    "latencies": [120, 115, 0, 130],
+    "statuses": [0, 0, -1, 1]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `start` | string | 起始时间（ISO 8601） |
+| `interval` | int | 数据间隔（分钟），固定为 5 |
+| `latencies` | int[] | 延迟数组（毫秒），无数据时为 0 |
+| `statuses` | int[] | 状态数组 |
+
+每个数据点的时间 = `start + index * interval` 分钟。
+
+`statuses` 取值：`0`=正常、`1`=故障、`-1`=无数据
 
 ---
 
@@ -744,6 +838,35 @@ DELETE /api/v1/admin/services/:id
 }
 ```
 
+#### 服务排序
+
+```
+PUT /api/v1/admin/services/reorder
+```
+
+批量更新服务的排序顺序。
+
+**请求**
+
+```json
+{
+  "services": [
+    { "id": 1, "sortOrder": 0 },
+    { "id": 3, "sortOrder": 1 },
+    { "id": 2, "sortOrder": 2 }
+  ]
+}
+```
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "Services reordered"
+}
+```
+
 ---
 
 ### 事件与更新管理
@@ -793,6 +916,47 @@ POST /api/v1/admin/incidents/:id/updates
   "content": "已定位问题并实施修复，正在监控恢复情况"
 }
 ```
+
+#### 更新事件进展
+
+```
+PUT /api/v1/admin/incidents/:id/updates/:updateId
+```
+
+**请求**
+
+```json
+{
+  "status": "monitoring",
+  "content": "已更新进展内容"
+}
+```
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "Incident update modified"
+}
+```
+
+#### 删除事件进展
+
+```
+DELETE /api/v1/admin/incidents/:id/updates/:updateId
+```
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "Incident update deleted"
+}
+```
+
+---
 
 #### 更新事件
 
@@ -1006,5 +1170,48 @@ DELETE /api/v1/admin/api-keys/:id
 {
   "code": 200,
   "message": "密钥已删除"
+}
+```
+
+---
+
+### 订阅者管理
+
+#### 获取订阅者列表
+
+```
+GET /api/v1/admin/subscribers
+```
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": [
+    {
+      "id": 1,
+      "email": "user@example.com",
+      "verified": true,
+      "createdAt": "2026-05-09T00:00:00Z",
+      "updatedAt": "2026-05-09T00:00:00Z"
+    }
+  ]
+}
+```
+
+#### 删除订阅者
+
+```
+DELETE /api/v1/admin/subscribers/:id
+```
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "删除成功"
 }
 ```

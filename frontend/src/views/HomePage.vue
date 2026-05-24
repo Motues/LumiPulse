@@ -240,9 +240,8 @@ onUnmounted(() => {
 
         <template v-for="(svc, idx) in summary.services" :key="svc.id">
           <div
-            class="px-6 pb-6 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/50 rounded-lg transition-colors"
+            class="px-6 pb-6 rounded-lg transition-colors"
             :class="{ 'pt-4': idx > 0 }"
-            @click="selectedService = svc"
           >
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center">

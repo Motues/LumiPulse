@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const Version = "0.1.4"
+const Version = "0.1.5"
 
 func main() {
 	if len(os.Args) > 1 {
