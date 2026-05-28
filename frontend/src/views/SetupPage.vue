@@ -43,8 +43,16 @@ const canSubmit = computed(() => {
 })
 
 function fieldClass(err: string) {
-  if (!err) return 'border-gray-200 dark:border-gray-700 focus:border-emerald-500 focus:ring-emerald-500'
-  return 'border-red-400 dark:border-red-500 focus:border-red-500 focus:ring-red-500'
+  if (!err) return 'focus:border-emerald-500 focus:ring-emerald-500'
+  return 'focus:border-red-500 focus:ring-red-500'
+}
+
+function fieldStyle(err: string) {
+  return {
+    border: `1px solid ${err ? '#ef4444' : 'var(--button-border-color)'}`,
+    backgroundColor: 'var(--bg-color)',
+    color: 'var(--text-color)',
+  }
 }
 
 async function handleSetup() {
@@ -66,35 +74,38 @@ async function handleSetup() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#f7f8fa] dark:bg-gray-950 flex items-center justify-center px-4">
+  <div class="min-h-screen flex items-center justify-center px-4" style="background-color: var(--bg-color);">
     <div class="w-full max-w-sm">
       <div class="text-center mb-8">
         <div class="flex items-center justify-center gap-2 mb-2">
           <img v-if="siteIcon" :src="siteIcon" class="w-8 h-8 object-contain" />
           <img v-else src="/assets/logo.svg" class="w-8 h-8 object-contain" />
-          <span class="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">{{ siteName }}</span>
+          <span class="text-2xl font-bold tracking-tight" style="color: var(--text-color);">{{ siteName }}</span>
         </div>
-        <p class="text-sm text-gray-500 dark:text-gray-400">首次使用，请设置管理员账号</p>
+        <p class="text-sm" style="color: var(--text-color); opacity: 0.5;">首次使用，请设置管理员账号</p>
       </div>
 
-      <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-6">
+      <div class="rounded-xl p-6" style="border: 1px solid var(--button-border-color);">
         <form @submit.prevent="handleSetup" class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">新用户名</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">新用户名</label>
             <input v-model="username" type="text" placeholder="请输入新用户名" @input="touched.username = true"
-                   :class="['w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-1 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 transition-colors', fieldClass(usernameError)]" />
+                   :class="['w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-1 transition-colors', fieldClass(usernameError)]"
+                   :style="fieldStyle(usernameError)" />
             <p v-if="usernameError" class="mt-1 text-xs text-red-500">{{ usernameError }}</p>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">新密码</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">新密码</label>
             <input v-model="password" type="password" placeholder="请输入新密码" @input="touched.password = true"
-                   :class="['w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-1 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 transition-colors', fieldClass(passwordError)]" />
+                   :class="['w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-1 transition-colors', fieldClass(passwordError)]"
+                   :style="fieldStyle(passwordError)" />
             <p v-if="passwordError" class="mt-1 text-xs text-red-500">{{ passwordError }}</p>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">确认密码</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">确认密码</label>
             <input v-model="confirmPassword" type="password" placeholder="请再次输入新密码" @input="touched.confirm = true"
-                   :class="['w-full px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-1 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 transition-colors', fieldClass(confirmError)]" />
+                   :class="['w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-1 transition-colors', fieldClass(confirmError)]"
+                   :style="fieldStyle(confirmError)" />
             <p v-if="confirmError" class="mt-1 text-xs text-red-500">{{ confirmError }}</p>
           </div>
           <button type="submit" :disabled="loading || !canSubmit"
@@ -105,7 +116,7 @@ async function handleSetup() {
       </div>
 
       <div class="text-center mt-6">
-        <a href="/" class="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">返回状态页</a>
+        <a href="/" class="text-sm transition-colors" style="color: var(--text-color); opacity: 0.4;">返回状态页</a>
       </div>
     </div>
     <Toast />

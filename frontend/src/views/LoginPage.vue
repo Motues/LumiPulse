@@ -38,28 +38,30 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#f7f8fa] dark:bg-gray-950 flex items-center justify-center px-4">
+  <div class="min-h-screen flex items-center justify-center px-4" style="background-color: var(--bg-color);">
     <div class="w-full max-w-sm">
       <div class="text-center mb-8">
         <div class="flex items-center justify-center gap-2 mb-2">
           <img v-if="siteIcon" :src="siteIcon" class="w-8 h-8 object-contain" />
           <img v-else src="/assets/logo.svg" class="w-8 h-8 object-contain" />
-          <span class="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">{{ siteName }}</span>
+          <span class="text-2xl font-bold tracking-tight" style="color: var(--text-color);">{{ siteName }}</span>
         </div>
-        <p class="text-sm text-gray-500 dark:text-gray-400">管理后台登录</p>
+        <p class="text-sm" style="color: var(--text-color); opacity: 0.5;">管理后台登录</p>
       </div>
 
-      <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-6">
+      <div class="rounded-xl p-6" style="border: 1px solid var(--button-border-color);">
         <form @submit.prevent="handleLogin" class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">用户名</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">用户名</label>
             <input v-model="username" type="text" placeholder="请输入用户名"
-                   class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500" />
+                   class="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                   style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">密码</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">密码</label>
             <input v-model="password" type="password" placeholder="请输入密码"
-                   class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500" />
+                   class="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                   style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
           </div>
           <button type="submit" :disabled="loading"
                   class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white font-medium rounded-lg text-sm transition-colors">
@@ -69,7 +71,7 @@ async function handleLogin() {
       </div>
 
       <div class="text-center mt-6">
-        <a href="/" class="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">返回状态页</a>
+        <a href="/" class="text-sm transition-opacity opacity-40 hover:opacity-100" style="color: var(--text-color);">返回状态页</a>
       </div>
     </div>
     <Toast />

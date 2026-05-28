@@ -80,49 +80,49 @@ onMounted(load)
 
 <template>
   <div>
-    <div v-if="loading" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
+    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
 
     <template v-else>
       <!-- Current User -->
-      <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm p-6 mb-6">
-        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">当前用户</h3>
+      <div class="rounded-xl p-6 mb-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+        <h3 class="text-lg font-bold mb-2" style="color: var(--text-color);">当前用户</h3>
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-sm">
             {{ currentUsername.charAt(0).toUpperCase() }}
           </div>
           <div>
-            <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ currentUsername }}</div>
-            <div class="text-xs text-gray-400 dark:text-gray-500">管理员</div>
+            <div class="text-sm font-medium" style="color: var(--text-color);">{{ currentUsername }}</div>
+            <div class="text-xs" style="color: var(--text-color); opacity: 0.4;">管理员</div>
           </div>
         </div>
       </div>
 
       <!-- Change Form -->
-      <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm p-6">
-        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">修改凭证</h3>
+      <div class="rounded-xl p-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">修改凭证</h3>
         <div class="space-y-4 max-w-md">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当前密码 *</label>
-            <input v-model="form.oldPassword" type="password" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 dark:bg-gray-800 dark:text-gray-100" />
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">当前密码 *</label>
+            <input v-model="form.oldPassword" type="password" class="w-full px-3 py-2 rounded-lg text-sm input-field" />
           </div>
 
-          <div class="border-t border-gray-100 dark:border-gray-800 pt-4">
-            <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">修改用户名（可选）</div>
+          <div class="pt-4" style="border-top: 1px solid var(--button-border-color);">
+            <div class="text-sm font-medium mb-3" style="color: var(--text-color); opacity: 0.5;">修改用户名（可选）</div>
             <div>
-              <input v-model="form.newUsername" type="text" placeholder="新用户名" class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 dark:bg-gray-800 dark:text-gray-100" />
+              <input v-model="form.newUsername" type="text" placeholder="新用户名" class="w-full px-3 py-2 rounded-lg text-sm input-field" />
               <p v-if="usernameError" class="text-xs text-red-500 mt-1">{{ usernameError }}</p>
             </div>
           </div>
 
-          <div class="border-t border-gray-100 dark:border-gray-800 pt-4">
-            <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">修改密码（可选）</div>
+          <div class="pt-4" style="border-top: 1px solid var(--button-border-color);">
+            <div class="text-sm font-medium mb-3" style="color: var(--text-color); opacity: 0.5;">修改密码（可选）</div>
             <div class="space-y-3">
               <div>
-                <input v-model="form.newPassword" type="password" placeholder="新密码" class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none dark:bg-gray-800 dark:text-gray-100" :class="passwordError ? 'border-red-300 dark:border-red-700 focus:border-red-500' : form.newPassword && !passwordError ? 'border-emerald-300 dark:border-emerald-700 focus:border-emerald-500' : 'border-gray-200 dark:border-gray-700 focus:border-emerald-500'" />
+                <input v-model="form.newPassword" type="password" placeholder="新密码" class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none" style="background-color: var(--bg-color); color: var(--text-color);" :class="passwordError ? 'border-red-300 dark:border-red-700 focus:border-red-500' : form.newPassword && !passwordError ? 'border-emerald-300 dark:border-emerald-700 focus:border-emerald-500' : ''" :style="!passwordError && !(form.newPassword && !passwordError) ? { borderColor: 'var(--button-border-color)' } : {}" />
                 <p v-if="passwordError" class="text-xs text-red-500 mt-1">{{ passwordError }}</p>
               </div>
               <div>
-                <input v-model="form.confirmPassword" type="password" placeholder="再次输入新密码" class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none dark:bg-gray-800 dark:text-gray-100" :class="confirmError ? 'border-red-300 dark:border-red-700 focus:border-red-500' : form.newPassword && form.confirmPassword ? 'border-emerald-300 dark:border-emerald-700 focus:border-emerald-500' : 'border-gray-200 dark:border-gray-700 focus:border-emerald-500'" />
+                <input v-model="form.confirmPassword" type="password" placeholder="再次输入新密码" class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none" style="background-color: var(--bg-color); color: var(--text-color);" :class="confirmError ? 'border-red-300 dark:border-red-700 focus:border-red-500' : form.newPassword && form.confirmPassword ? 'border-emerald-300 dark:border-emerald-700 focus:border-emerald-500' : ''" :style="!confirmError && !(form.newPassword && form.confirmPassword) ? { borderColor: 'var(--button-border-color)' } : {}" />
                 <p v-if="confirmError" class="text-xs text-red-500 mt-1">{{ confirmError }}</p>
               </div>
             </div>
@@ -132,7 +132,8 @@ onMounted(load)
             <button
               @click="save"
               :disabled="!canSave || saving"
-              class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              :style="(!canSave || saving) ? { opacity: 0.3 } : {}"
             >
               {{ saving ? '保存中...' : '保存修改' }}
             </button>

@@ -5,7 +5,7 @@ import { version } from '../../../package.json'
 import { siteName, siteIcon } from '../../composables/useSiteConfig'
 import { useDarkMode } from '../../composables/useDarkMode'
 
-const { isDark, toggle: toggleDark } = useDarkMode()
+const { isDark, themeMode, toggle: toggleDark } = useDarkMode()
 
 const props = defineProps<{
   collapsed: boolean
@@ -59,19 +59,21 @@ function onItemLeave(e: MouseEvent) {
 <template>
   <aside
     :class="[
-      'bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800 flex flex-col flex-shrink-0 transition-all duration-200',
+      'flex flex-col flex-shrink-0 transition-all duration-200',
       mobileOpen !== undefined ? 'w-64 z-40' : (isEffectivelyCollapsed ? 'w-16 z-20' : 'w-64 z-20'),
       mobileOpen !== undefined
         ? 'fixed left-0 top-0 h-screen'
         : 'relative',
       mobileOpen !== undefined && !mobileOpen ? '-translate-x-full' : 'translate-x-0',
     ]"
+    style="background-color: var(--bg-color); border-right: 1px solid var(--button-border-color);"
   >
-    <div class="h-16 flex items-center border-b border-gray-50 dark:border-gray-800" :class="isEffectivelyCollapsed ? 'justify-center px-2' : 'px-6'">
+    <div class="h-16 flex items-center" :class="isEffectivelyCollapsed ? 'justify-center px-2' : 'px-6'" style="border-bottom: 1px solid var(--button-border-color);">
       <img v-if="siteIcon" :src="siteIcon" class="w-7 h-7 flex-shrink-0 object-contain" />
       <img v-else src="/assets/logo.svg" class="w-7 h-7 flex-shrink-0 object-contain" />
       <span
-        class="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100 overflow-hidden whitespace-nowrap transition-all duration-200"
+        class="text-xl font-bold tracking-tight overflow-hidden whitespace-nowrap transition-all duration-200"
+        style="color: var(--text-color);"
         :class="isEffectivelyCollapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-2'"
       >{{ siteName }}</span>
     </div>
@@ -79,12 +81,13 @@ function onItemLeave(e: MouseEvent) {
     <div class="flex-1 overflow-y-auto no-scrollbar p-3 space-y-4">
       <template v-for="(group, gi) in navGroups" :key="gi">
         <!-- Divider between groups -->
-        <hr v-if="gi > 0" class="border-gray-100 dark:border-gray-800 transition-all duration-200" :class="isEffectivelyCollapsed ? 'opacity-0' : 'opacity-100'" />
+        <hr v-if="gi > 0" class="transition-all duration-200" :class="isEffectivelyCollapsed ? 'opacity-0' : 'opacity-100'" style="border-color: var(--button-border-color);" />
 
         <!-- Section title -->
         <div
           v-if="group.title"
-          class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider px-3 overflow-hidden whitespace-nowrap transition-all duration-200"
+          class="text-[10px] font-semibold uppercase tracking-wider px-3 overflow-hidden whitespace-nowrap transition-all duration-200"
+          style="color: var(--text-color); opacity: 0.4;"
           :class="isEffectivelyCollapsed ? 'max-h-0 py-0 opacity-0' : 'max-h-8 py-2 opacity-100'"
         >
           {{ group.title }}
@@ -97,8 +100,9 @@ function onItemLeave(e: MouseEvent) {
             @click="emit('select', item.id)"
             @mouseenter="onItemEnter(item, $event)"
             @mouseleave="onItemLeave"
-            class="flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
-            :class="activeSection === item.id ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'"
+            class="sidebar-item flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+            :class="activeSection === item.id ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : ''"
+            :style="activeSection !== item.id ? { color: 'var(--text-color)' } : {}"
           >
             <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
@@ -109,7 +113,7 @@ function onItemLeave(e: MouseEvent) {
             >{{ item.label }}</span>
             <span
               v-if="item.id === 'incidents' && activeIncidentCount > 0"
-              class="ml-auto min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none"
+              class="ml-auto min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full bg-red-500 text-white text-[10px] font-bold"
               :class="isEffectivelyCollapsed ? 'hidden' : ''"
             >
               {{ activeIncidentCount > 99 ? '99+' : activeIncidentCount }}
@@ -119,31 +123,35 @@ function onItemLeave(e: MouseEvent) {
       </template>
     </div>
 
-    <div class="p-4 border-t border-gray-100 dark:border-gray-800" :class="isEffectivelyCollapsed ? 'text-center' : ''">
+    <div class="p-4" :class="isEffectivelyCollapsed ? 'text-center' : ''" style="border-top: 1px solid var(--button-border-color);">
       <div
-        class="text-xs text-gray-400 dark:text-gray-500 overflow-hidden whitespace-nowrap transition-all duration-200"
+        class="text-xs overflow-hidden whitespace-nowrap transition-all duration-200"
+        style="color: var(--text-color);"
         :class="isEffectivelyCollapsed ? 'max-w-0 opacity-0' : 'max-w-48 opacity-100'"
       >
-        <div class="mb-1">版本 v{{ version }}</div>
+        <div class="mb-1" style="opacity: 0.6;">版本 v{{ version }}</div>
         <div class="mb-2">
           <a
             href="https://github.com/Motues/LumiPulse"
             target="_blank"
             rel="noopener noreferrer"
-            class="hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors"
+            class="sidebar-footer-link transition-colors"
           >Powered By LumiPulse</a>
         </div>
         <button
           @click="toggleDark"
-          class="flex items-center gap-1.5 text-gray-400 dark:text-gray-500 hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors"
+          class="flex items-center gap-1.5 sidebar-footer-link transition-colors"
         >
-          <svg v-if="isDark" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+          <svg v-if="themeMode === 'light'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
           </svg>
-          <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          <svg v-else-if="themeMode === 'dark'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" />
           </svg>
-          {{ isDark ? '浅色模式' : '深色模式' }}
+          <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
+          </svg>
+          {{ themeMode === 'system' ? '跟随系统' : themeMode === 'dark' ? '深色模式' : '浅色模式' }}
         </button>
       </div>
     </div>
@@ -154,10 +162,25 @@ function onItemLeave(e: MouseEvent) {
       class="fixed z-50 pointer-events-none flex items-center"
       :style="{ left: tooltipX + 'px', top: tooltipY + 'px', transform: 'translateY(-50%)' }"
     >
-      <div class="w-2 h-2 bg-white dark:bg-gray-800 rotate-45 -mr-[3px] border-l border-b border-gray-200 dark:border-gray-700" />
-      <div class="bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 text-xs font-medium px-3 py-1.5 rounded-md whitespace-nowrap shadow-lg border border-gray-200 dark:border-gray-700">
+      <div class="w-2 h-2 rotate-45 -mr-[3px]" style="background-color: var(--bg-color); border-left: 1px solid var(--button-border-color); border-bottom: 1px solid var(--button-border-color);" />
+      <div class="text-xs font-medium px-3 py-1.5 rounded-md whitespace-nowrap" style="background-color: var(--bg-color); color: var(--text-color); border: 1px solid var(--button-border-color);">
         {{ hoveredItem.label }}
       </div>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.sidebar-item:hover {
+  background-color: var(--button-hover-color);
+}
+.sidebar-footer-link {
+  color: var(--text-color);
+  opacity: 0.6;
+  transition: color 0.15s, opacity 0.15s;
+}
+.sidebar-footer-link:hover {
+  color: #10b981;
+  opacity: 1;
+}
+</style>

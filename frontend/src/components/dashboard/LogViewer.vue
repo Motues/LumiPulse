@@ -2,12 +2,13 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../../api/client'
 import type { LogEntry, ServiceSummary } from '../../api/types'
+import CustomSelect from './CustomSelect.vue'
 
 const logs = ref<LogEntry[]>([])
 const loading = ref(true)
 const page = ref(1)
 const totalPage = ref(0)
-const filterServiceId = ref(0)
+const filterServiceId = ref('0')
 const filterStatus = ref('all')
 const services = ref<ServiceSummary[]>([])
 const autoRefresh = ref(true)
@@ -24,7 +25,7 @@ async function loadServices() {
 
 async function fetchLogs() {
   try {
-    const res = await api.getLogs(page.value, 50, filterServiceId.value, filterStatus.value)
+    const res = await api.getLogs(page.value, 50, Number(filterServiceId.value), filterStatus.value)
     logs.value = res.data.logs
     totalPage.value = res.data.pagination.totalPage
   } catch {
@@ -38,7 +39,7 @@ function startRefresh() {
   stopRefresh()
   if (autoRefresh.value) {
     refreshTimer = setInterval(() => {
-      api.getLogs(1, 50, filterServiceId.value, filterStatus.value).then(res => {
+      api.getLogs(1, 50, Number(filterServiceId.value), filterStatus.value).then(res => {
         logs.value = res.data.logs
         totalPage.value = res.data.pagination.totalPage
         page.value = 1
@@ -127,30 +128,26 @@ onUnmounted(() => {
     <!-- Toolbar -->
     <div class="flex items-center justify-between mb-4">
       <div class="flex items-center gap-3">
-        <select
+        <CustomSelect
           v-model="filterServiceId"
-          @change="onFilterChange"
-          class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 bg-white dark:bg-gray-800 dark:text-gray-100"
-        >
-          <option :value="0">全部服务</option>
-          <option v-for="svc in services" :key="svc.id" :value="svc.id">{{ svc.name }}</option>
-        </select>
-        <select
+          @update:modelValue="onFilterChange"
+          :options="[{ label: '全部服务', value: '0' }, ...services.map(svc => ({ label: svc.name, value: String(svc.id) }))]"
+          min-width="140px"
+        />
+        <CustomSelect
           v-model="filterStatus"
-          @change="onFilterChange"
-          class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500 bg-white dark:bg-gray-800 dark:text-gray-100"
-        >
-          <option value="all">全部状态</option>
-          <option value="success">正常</option>
-          <option value="failure">异常</option>
-        </select>
-        <span class="text-xs text-gray-400 dark:text-gray-500">{{ logs.length }} 条记录</span>
+          @update:modelValue="onFilterChange"
+          :options="[{ label: '全部状态', value: 'all' }, { label: '正常', value: 'success' }, { label: '异常', value: 'failure' }]"
+          min-width="110px"
+        />
+        <span class="text-xs" style="color: var(--text-color); opacity: 0.4;">{{ logs.length }} 条记录</span>
       </div>
       <div class="flex items-center gap-2">
         <button
           @click="toggleRefresh"
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-          :class="autoRefresh ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400'"
+          :class="autoRefresh ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : ''"
+          :style="!autoRefresh ? { backgroundColor: 'var(--bg-color)', color: 'var(--text-color)', opacity: 0.5 } : {}"
         >
           <svg class="w-3.5 h-3.5" :class="{ 'animate-spin': autoRefresh }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -161,15 +158,15 @@ onUnmounted(() => {
     </div>
 
     <!-- Table -->
-    <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
-      <div v-if="loading" class="text-center py-16 text-gray-400 dark:text-gray-500 text-sm">加载中...</div>
-      <div v-else-if="logs.length === 0" class="text-center py-16 text-gray-400 dark:text-gray-500 text-sm">暂无监控日志</div>
+    <div class="rounded-xl overflow-hidden" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+      <div v-if="loading" class="text-center py-16 text-sm" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+      <div v-else-if="logs.length === 0" class="text-center py-16 text-sm" style="color: var(--text-color); opacity: 0.4;">暂无监控日志</div>
 
       <template v-else>
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto thin-scroll">
           <table class="w-full text-sm">
             <thead>
-              <tr class="border-b border-gray-50 dark:border-gray-800 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              <tr class="text-xs uppercase tracking-wider" style="border-bottom: 1px solid var(--button-border-color); color: var(--text-color); opacity: 0.5;">
                 <th class="text-left px-4 py-3 font-medium">时间</th>
                 <th class="text-left px-4 py-3 font-medium">服务</th>
                 <th class="text-left px-4 py-3 font-medium">状态</th>
@@ -180,24 +177,25 @@ onUnmounted(() => {
             <tbody>
               <tr
                 v-for="log in logs" :key="log.id"
-                class="border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors"
+                class="transition-colors"
+                style="border-bottom: 1px solid var(--button-border-color);"
               >
-                <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
+                <td class="px-4 py-3 text-xs whitespace-nowrap font-mono" style="color: var(--text-color); opacity: 0.5;">
                   {{ formatTime(log.createdAt) }}
                 </td>
-                <td class="px-4 py-3 text-gray-800 dark:text-gray-200 font-medium whitespace-nowrap">
+                <td class="px-4 py-3 font-medium whitespace-nowrap" style="color: var(--text-color); opacity: 0.8;">
                   {{ log.serviceName }}
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
                   <span
                     class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium"
                     :class="isSuccess(log.status)
-                      ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                      ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                       : 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300'"
                   >
                     <span class="w-1.5 h-1.5 rounded-full" :class="isSuccess(log.status) ? 'bg-emerald-500' : 'bg-red-500'" />
                     {{ isSuccess(log.status) ? '正常' : '异常' }}
-                    <span class="text-gray-400 dark:text-gray-500 font-mono">({{ statusLabel(log.status) }})</span>
+                    <span class="font-mono" style="color: var(--text-color); opacity: 0.4;">({{ statusLabel(log.status) }})</span>
                   </span>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
@@ -205,7 +203,7 @@ onUnmounted(() => {
                     {{ latencyText(log.latency) }}
                   </span>
                 </td>
-                <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" :title="log.message">
+                <td class="px-4 py-3 text-xs max-w-xs truncate" :title="log.message" style="color: var(--text-color); opacity: 0.5;">
                   {{ log.message || '-' }}
                 </td>
               </tr>
@@ -214,18 +212,20 @@ onUnmounted(() => {
         </div>
 
         <!-- Pagination -->
-        <div v-if="totalPage > 1" class="flex items-center justify-between px-4 py-3 border-t border-gray-50 dark:border-gray-800">
-          <span class="text-xs text-gray-500 dark:text-gray-400">第 {{ page }} / {{ totalPage }} 页</span>
+        <div v-if="totalPage > 1" class="flex items-center justify-between px-4 py-3" style="border-top: 1px solid var(--button-border-color);">
+          <span class="text-xs" style="color: var(--text-color); opacity: 0.5;">第 {{ page }} / {{ totalPage }} 页</span>
           <div class="flex items-center gap-2">
             <button
               @click="prevPage"
               :disabled="page <= 1"
-              class="px-3 py-1 text-xs rounded-md border border-gray-200 dark:border-gray-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors dark:text-gray-300"
+              class="px-3 py-1 text-xs rounded-md border disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              style="border-color: var(--button-border-color); color: var(--text-color);"
             >上一页</button>
             <button
               @click="nextPage"
               :disabled="page >= totalPage"
-              class="px-3 py-1 text-xs rounded-md border border-gray-200 dark:border-gray-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors dark:text-gray-300"
+              class="px-3 py-1 text-xs rounded-md border disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              style="border-color: var(--button-border-color); color: var(--text-color);"
             >下一页</button>
           </div>
         </div>

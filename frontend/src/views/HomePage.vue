@@ -434,14 +434,12 @@ onUnmounted(() => {
 <style scoped>
 .header-btn {
   color: var(--text-color);
-  opacity: 0.7;
   border: 1px solid var(--button-border-color);
   background-color: var(--bg-color);
-  transition: background-color 0.2s, opacity 0.2s;
+  transition: background-color 0.2s;
 }
 .header-btn:hover {
   background-color: var(--button-hover-color);
-  opacity: 1;
 }
 .footer-link {
   color: var(--text-color);

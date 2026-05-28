@@ -26,10 +26,10 @@ const statusLabel: Record<string, string> = { operational: '正常', degraded: '
 
 const statusClass = (s: string) => {
   switch (s) {
-    case 'operational': return 'text-emerald-600 bg-emerald-50 border-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/30 dark:border-emerald-800'
+    case 'operational': return 'text-emerald-600 bg-emerald-50 border-emerald-100 dark:text-emerald-400 dark:bg-emerald-500/15 dark:border-emerald-800'
     case 'degraded': return 'text-yellow-600 bg-yellow-50 border-yellow-100 dark:text-yellow-400 dark:bg-yellow-900/30 dark:border-yellow-800'
     case 'outage': return 'text-red-600 bg-red-50 border-red-100 dark:text-red-400 dark:bg-red-900/30 dark:border-red-800'
-    default: return 'text-gray-600 bg-gray-50 border-gray-100 dark:text-gray-400 dark:bg-gray-800 dark:border-gray-700'
+    default: return ''
   }
 }
 
@@ -140,52 +140,52 @@ watch(() => props.service.id, () => {
   <div>
     <!-- Header -->
     <div class="flex items-center justify-between mb-4">
-      <button @click="emit('back')" class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+      <button @click="emit('back')" class="flex items-center gap-1.5 text-sm transition-colors hover:opacity-100" style="color: var(--text-color); opacity: 0.5;">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
         返回列表
       </button>
     </div>
 
     <!-- Info card -->
-    <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-5 shadow-sm mb-6">
+    <div class="rounded-xl p-5 mb-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
       <div class="flex items-start justify-between mb-4">
         <div>
-          <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">{{ service.name }}</h2>
-          <div class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ service.url }}</div>
+          <h2 class="text-lg font-bold" style="color: var(--text-color);">{{ service.name }}</h2>
+          <div class="text-sm mt-1" style="color: var(--text-color); opacity: 0.5;">{{ service.url }}</div>
         </div>
-        <span :class="['inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border', statusClass(service.status)]">
+        <span :class="['inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border', statusClass(service.status)]" :style="!['operational','degraded','outage'].includes(service.status) ? 'color: var(--text-color); opacity: 0.6; background-color: var(--bg-color); border-color: var(--button-border-color);' : ''">
           <span :class="['w-1.5 h-1.5 rounded-full',
             service.status === 'operational' ? 'bg-emerald-500' : service.status === 'degraded' ? 'bg-yellow-400' : 'bg-red-500'
           ]" />
           {{ statusLabel[service.status] || service.status }}
         </span>
       </div>
-      <div v-if="service.description" class="text-sm text-gray-600 dark:text-gray-400 mb-4">{{ service.description }}</div>
+      <div v-if="service.description" class="text-sm mb-4" style="color: var(--text-color); opacity: 0.6;">{{ service.description }}</div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
-          <div class="text-gray-400 dark:text-gray-500 mb-1">类型</div>
-          <div class="text-gray-900 dark:text-gray-100 font-medium">{{ { http: 'HTTP', tcp: 'TCP', ping: 'Ping' }[service.type] || service.type }}</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">类型</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ { http: 'HTTP', tcp: 'TCP', ping: 'Ping' }[service.type] || service.type }}</div>
         </div>
         <div>
-          <div class="text-gray-400 dark:text-gray-500 mb-1">在线率</div>
-          <div class="font-medium" :class="service.uptime >= 99.9 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-gray-100'">{{ service.uptime.toFixed(2) }}%</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">在线率</div>
+          <div class="font-medium" :class="service.uptime >= 99.9 ? 'text-emerald-600' : ''" :style="service.uptime >= 99.9 ? '' : 'color: var(--text-color);'">{{ service.uptime.toFixed(2) }}%</div>
         </div>
         <div>
-          <div class="text-gray-400 dark:text-gray-500 mb-1">当前延迟</div>
-          <div class="text-gray-900 dark:text-gray-100 font-medium">{{ service.latency }}ms</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">当前延迟</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ service.latency }}ms</div>
         </div>
         <div>
-          <div class="text-gray-400 dark:text-gray-500 mb-1">探测间隔</div>
-          <div class="text-gray-900 dark:text-gray-100 font-medium">{{ service.interval }}s</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">探测间隔</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ service.interval }}s</div>
         </div>
       </div>
     </div>
 
     <!-- Latency chart -->
-    <div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-5 shadow-sm">
-      <h3 class="font-bold text-gray-900 dark:text-gray-100 mb-4">最近24小时延迟</h3>
-      <div v-if="loading" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
-      <div v-else-if="statuses.every(s => s === -1)" class="text-center py-12 text-gray-400 dark:text-gray-500">暂无数据</div>
+    <div class="rounded-xl p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+      <h3 class="font-bold mb-4" style="color: var(--text-color);">最近24小时延迟</h3>
+      <div v-if="loading" class="text-center py-12 " style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+      <div v-else-if="statuses.every(s => s === -1)" class="text-center py-12 " style="color: var(--text-color); opacity: 0.4;">暂无数据</div>
       <div v-else class="w-full" style="aspect-ratio: 800/250;">
         <svg
           :viewBox="`0 0 ${chartW} ${chartH}`"
@@ -197,19 +197,19 @@ watch(() => props.service.id, () => {
           <!-- Grid lines -->
           <line v-for="tick in chartData!.yTicks" :key="tick.label"
             :x1="padL" :y1="tick.y" :x2="chartW - padR" :y2="tick.y"
-            class="stroke-gray-200 dark:stroke-gray-700" stroke-dasharray="4,4" stroke-width="1"
+            stroke="var(--button-border-color)" stroke-dasharray="4,4" stroke-width="1"
           />
 
           <!-- Y axis labels -->
           <text v-for="tick in chartData!.yTicks" :key="'yl-' + tick.label"
             :x="padL - 8" :y="tick.y + 4"
-            text-anchor="end" class="fill-gray-400 dark:fill-gray-500" style="font-size: 9px;"
+            text-anchor="end" fill="var(--text-color)" fill-opacity="0.4" style="font-size: 9px;"
           >{{ tick.label }}</text>
 
           <!-- X axis labels -->
           <text v-for="tick in chartData!.xTicks" :key="'xl-' + tick.label"
             :x="tick.x" :y="chartH - 8"
-            text-anchor="middle" class="fill-gray-400 dark:fill-gray-500" style="font-size: 9px;"
+            text-anchor="middle" fill="var(--text-color)" fill-opacity="0.4" style="font-size: 9px;"
           >{{ tick.label }}</text>
 
           <!-- Colored area fills -->
@@ -228,26 +228,26 @@ watch(() => props.service.id, () => {
             <line
               :x1="chartData!.toX(hoverIndex)" :y1="padT"
               :x2="chartData!.toX(hoverIndex)" :y2="padT + plotH"
-              class="stroke-gray-400 dark:stroke-gray-500" stroke-width="1" stroke-dasharray="3,3"
+              stroke="var(--text-color)" stroke-opacity="0.4" stroke-width="1" stroke-dasharray="3,3"
             />
             <circle
               :cx="chartData!.toX(hoverIndex)" :cy="chartData!.toY(latencies[hoverIndex])"
-              r="4" class="fill-emerald-500 stroke-white dark:stroke-gray-900" stroke-width="2"
+              r="4" class="fill-emerald-500" stroke="var(--bg-color)" stroke-width="2"
             />
             <!-- Tooltip -->
             <rect
               :x="chartData!.toX(hoverIndex) - 35" :y="chartData!.toY(latencies[hoverIndex]) - 28"
               width="70" height="22" rx="4"
-              class="fill-gray-900 dark:fill-gray-100"
+              fill="var(--text-color)"
             />
             <text
               :x="chartData!.toX(hoverIndex)" :y="chartData!.toY(latencies[hoverIndex]) - 13"
-              text-anchor="middle" class="fill-white dark:fill-gray-900" style="font-size: 9px; font-weight: 500;"
+              text-anchor="middle" fill="var(--bg-color)" style="font-size: 9px; font-weight: 500;"
             >{{ statuses[hoverIndex] === -1 ? '无数据' : latencies[hoverIndex] + 'ms' }}</text>
           </template>
         </svg>
       </div>
-      <div class="flex items-center justify-center gap-4 mt-2 text-xs text-gray-400 dark:text-gray-500">
+      <div class="flex items-center justify-center gap-4 mt-2 text-xs " style="color: var(--text-color); opacity: 0.4;">
         <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-[#34a761]"></span>正常</span>
         <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-[#df2d2a]"></span>故障</span>
         <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-gray-400"></span>无数据</span>
