@@ -82,7 +82,8 @@ function timeText(minutes: number): string {
         v-for="(pair, i) in days"
         :key="i"
         :style="{ backgroundColor: getColorForDowntime(pair[1]) }"
-        class="flex-1 h-full rounded-[1px] cursor-pointer transition-all duration-100 hover:brightness-110 hover:scale-y-110"
+        class="flex-1 h-full rounded-[1px] cursor-pointer hover:brightness-110 hover:scale-y-110"
+        style="transition: background-color 0.15s ease, transform 0.1s ease, filter 0.1s ease;"
         @mouseenter="onCellEnter($event, i)"
         @mouseleave="onCellLeave"
       />
@@ -91,19 +92,20 @@ function timeText(minutes: number): string {
     <!-- Tooltip -->
     <div
       v-if="hoveredIndex >= 0"
-      class="fixed z-50 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-100 dark:border-gray-700 px-4 py-3 pointer-events-none"
-      :style="{ left: tooltipX + 'px', top: tooltipY + 'px', transform: 'translateX(-50%) translateY(-100%)', width: '220px' }"
+      class="fixed z-50 rounded-lg shadow-lg px-4 py-3 pointer-events-none"
+      :style="{ left: tooltipX + 'px', top: tooltipY + 'px', transform: 'translateX(-50%) translateY(-100%)', width: '220px', backgroundColor: 'var(--bg-color)', border: '1px solid var(--button-border-color)' }"
     >
       <!-- Arrow -->
-      <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-l-8 border-r-8 border-t-8 border-transparent border-t-white dark:border-t-gray-800" />
+      <div class="absolute left-1/2 -bottom-[9px] -translate-x-1/2 w-0 h-0 border-l-[9px] border-r-[9px] border-t-[9px] border-transparent" :style="{ borderTopColor: 'var(--button-border-color)' }" />
+      <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[8px] border-transparent" :style="{ borderTopColor: 'var(--bg-color)' }" />
 
-      <div class="text-sm font-bold text-gray-900 dark:text-gray-100 mb-2">
+      <div class="text-sm font-bold mb-2" style="color: var(--text-color);">
         {{ formatDate(hoveredIndex, days.length) }}
       </div>
 
       <template v-if="days[hoveredIndex]">
         <template v-if="days[hoveredIndex][0] === -1">
-          <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <div class="flex items-center gap-2 text-sm" style="color: var(--text-color); opacity: 0.5;">
             <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(-1) }" />
             无数据
           </div>
@@ -119,7 +121,7 @@ function timeText(minutes: number): string {
             <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(days[hoveredIndex][1]) }" />
             服务异常 {{ timeText(days[hoveredIndex][1]) }}
           </div>
-          <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 ml-4.5">
+          <div class="text-xs mt-1 ml-4.5" style="color: var(--text-color); opacity: 0.4;">
             当前状态：{{ statusLabel[days[hoveredIndex][2]] || '已解决' }}
           </div>
         </template>
@@ -128,11 +130,11 @@ function timeText(minutes: number): string {
 
     <!-- Bottom legend -->
     <div v-if="!hideLegend" class="flex items-center text-xs font-medium mt-1 tracking-tight">
-      <span class="flex-shrink-0 text-gray-400 dark:text-gray-500">{{ days.length }} 天前</span>
-      <span class="flex-1 mx-2 h-px bg-gray-300 dark:bg-gray-700" />
+      <span class="flex-shrink-0" style="color: var(--text-color); opacity: 0.4;">{{ days.length }} 天前</span>
+      <span class="flex-1 mx-2 h-px" style="background-color: var(--button-border-color);" />
       <span class="font-semibold flex-shrink-0" :style="{ color: getUptimeColor(uptime) }">{{ uptime.toFixed(1) }}% 在线率</span>
-      <span class="flex-1 mx-2 h-px bg-gray-300 dark:bg-gray-700" />
-      <span class="flex-shrink-0 text-gray-400 dark:text-gray-500">今天</span>
+      <span class="flex-1 mx-2 h-px" style="background-color: var(--button-border-color);" />
+      <span class="flex-shrink-0" style="color: var(--text-color); opacity: 0.4;">今天</span>
     </div>
   </div>
 </template>

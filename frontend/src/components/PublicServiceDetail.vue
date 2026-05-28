@@ -138,18 +138,18 @@ watch(() => props.service.id, loadLatency)
 <template>
   <div>
     <div class="flex items-center mb-4">
-      <button @click="emit('back')" class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+      <button @click="emit('back')" class="flex items-center gap-1.5 text-sm transition-colors hover:opacity-80" style="color: var(--text-color); opacity: 0.5;">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
         返回列表
       </button>
     </div>
 
     <!-- Info card -->
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 p-6 mb-6">
+    <div class="rounded-lg p-6 mb-6" style="background-color: var(--button-hover-color);">
       <div class="flex items-start justify-between mb-4">
         <div>
-          <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">{{ service.name }}</h2>
-          <a v-if="service.url" :href="service.url" target="_blank" class="text-sm text-gray-500 dark:text-gray-400 hover:text-emerald-500 dark:hover:text-emerald-400 mt-1 inline-block">{{ service.url }}</a>
+          <h2 class="text-lg font-bold" style="color: var(--text-color);">{{ service.name }}</h2>
+          <a v-if="service.url" :href="service.url" target="_blank" class="text-sm hover:text-emerald-500 dark:hover:text-emerald-400 mt-1 inline-block" style="color: var(--text-color); opacity: 0.5;">{{ service.url }}</a>
         </div>
         <div class="flex items-center gap-1.5 text-sm font-medium" :class="{
           'text-[#45ba65] dark:text-[#4ade80]': service.status === 'operational',
@@ -162,25 +162,25 @@ watch(() => props.service.id, loadLatency)
       </div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
         <div>
-          <div class="text-gray-400 dark:text-gray-500 mb-1">在线率</div>
-          <div class="font-medium" :class="service.uptime >= 99.9 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-gray-100'">{{ service.uptime.toFixed(2) }}%</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">在线率</div>
+          <div class="font-medium" :class="service.uptime >= 99.9 ? 'text-emerald-600 dark:text-emerald-400' : ''" :style="service.uptime < 99.9 ? 'color: var(--text-color);' : ''">{{ service.uptime.toFixed(2) }}%</div>
         </div>
         <div>
-          <div class="text-gray-400 dark:text-gray-500 mb-1">响应时间</div>
-          <div class="text-gray-900 dark:text-gray-100 font-medium">{{ service.latency }}ms</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">响应时间</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ service.latency }}ms</div>
         </div>
         <div>
-          <div class="text-gray-400 dark:text-gray-500 mb-1">探测频率</div>
-          <div class="text-gray-900 dark:text-gray-100 font-medium">{{ service.interval }}s</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">探测频率</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ service.interval }}s</div>
         </div>
       </div>
     </div>
 
     <!-- Latency chart -->
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 p-6 mb-6">
-      <h3 class="font-bold text-gray-900 dark:text-gray-100 mb-4">最近24小时延迟</h3>
-      <div v-if="loading" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
-      <div v-else-if="statuses.every(s => s === -1)" class="text-center py-12 text-gray-400 dark:text-gray-500">暂无数据</div>
+    <div class="rounded-lg p-6 mb-6" style="background-color: var(--button-hover-color);">
+      <h3 class="font-bold mb-4" style="color: var(--text-color);">最近24小时延迟</h3>
+      <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+      <div v-else-if="statuses.every(s => s === -1)" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">暂无数据</div>
       <div v-else class="w-full" style="aspect-ratio: 800/250;">
         <svg
           :viewBox="`0 0 ${chartW} ${chartH}`"
@@ -235,7 +235,7 @@ watch(() => props.service.id, loadLatency)
           </template>
         </svg>
       </div>
-      <div class="flex items-center justify-center gap-4 mt-2 text-xs text-gray-400 dark:text-gray-500">
+      <div class="flex items-center justify-center gap-4 mt-2 text-xs" style="color: var(--text-color); opacity: 0.4;">
         <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-[#34a761]"></span>正常</span>
         <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-[#df2d2a]"></span>故障</span>
         <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-gray-400"></span>无数据</span>
@@ -243,8 +243,8 @@ watch(() => props.service.id, loadLatency)
     </div>
 
     <!-- Service history matrix -->
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 p-6">
-      <h3 class="font-bold text-gray-900 dark:text-gray-100 mb-4">服务历史</h3>
+    <div class="rounded-lg p-6" style="background-color: var(--button-hover-color);">
+      <h3 class="font-bold mb-4" style="color: var(--text-color);">服务历史</h3>
       <ServiceMatrix :days="dailyDays" :uptime="service.uptime" />
     </div>
   </div>
