@@ -1,4 +1,5 @@
 package model
+
 // Service 监控服务/节点
 type Service struct {
 	ID              int64  `db:"id" json:"id"`
@@ -26,10 +27,10 @@ type Heartbeat struct {
 
 // LatencyResponse 紧凑延迟数据响应
 type LatencyResponse struct {
-	Start    string `json:"start"`              // 起始时间 ISO
-	Interval int    `json:"interval"`            // 间隔分钟数
-	Latencies []int  `json:"latencies"`          // 延迟数组 (ms)
-	Statuses  []int  `json:"statuses"`           // 状态数组 (0=正常, 1=故障, -1=无数据)
+	Start     string `json:"start"`          // 起始时间 ISO
+	Interval  int    `json:"interval"`        // 间隔分钟数
+	Latencies []int  `json:"latencies"`        // 延迟数组 (ms)
+	Statuses  []int  `json:"statuses"`          // 状态数组 (0=正常, 1=故障, -1=无数据)
 }
 
 // Server 服务器（逻辑分组）
@@ -66,6 +67,7 @@ type Incident struct {
 	Status           string      `db:"status" json:"status"`           // investigating, identified, monitoring, resolved
 	AffectedServices string      `db:"affected_services" json:"affectedServices"` // 逗号分隔的服务 ID
 	ParentID         *int64      `db:"parent_id" json:"parentId,omitempty"`
+	ResolvedAt       *string     `db:"resolved_at" json:"resolvedAt,omitempty"`
 	CreatedAt        string      `db:"created_at" json:"createdAt"`
 	UpdatedAt        string      `db:"updated_at" json:"updatedAt"`
 	// Joined fields

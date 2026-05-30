@@ -13,6 +13,7 @@ import (
 func (h *Handler) ListApiKeys(c *gin.Context) {
 	keys, err := h.Repo.ListApiKeys(c.Request.Context())
 	if err != nil {
+		utils.Warn("list api keys failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "获取密钥列表失败"})
 		return
 	}
@@ -71,6 +72,7 @@ func (h *Handler) CreateApiKey(c *gin.Context) {
 	}
 
 	if err := h.Repo.CreateApiKey(c.Request.Context(), k); err != nil {
+		utils.Error("create api key failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "创建密钥失败"})
 		return
 	}
@@ -107,6 +109,7 @@ func (h *Handler) UpdateApiKey(c *gin.Context) {
 	}
 
 	if err := h.Repo.UpdateApiKeyName(c.Request.Context(), id, req.Name); err != nil {
+		utils.Error("update api key %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "更新密钥失败"})
 		return
 	}
@@ -127,6 +130,7 @@ func (h *Handler) DeleteApiKey(c *gin.Context) {
 	}
 
 	if err := h.Repo.DeleteApiKey(c.Request.Context(), id); err != nil {
+		utils.Error("delete api key %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "删除密钥失败"})
 		return
 	}

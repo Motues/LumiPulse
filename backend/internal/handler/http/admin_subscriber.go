@@ -2,6 +2,7 @@ package http
 
 import (
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 func (h *Handler) AdminListSubscribers(c *gin.Context) {
 	subscribers, err := h.Repo.ListSubscribers(c.Request.Context())
 	if err != nil {
+		utils.Error("list subscribers failed: %v", err)
 		c.JSON(http.StatusInternalServerError, model.APIResponse{Code: 500, Message: "获取订阅者列表失败"})
 		return
 	}
@@ -30,6 +32,7 @@ func (h *Handler) AdminDeleteSubscriber(c *gin.Context) {
 		return
 	}
 	if err := h.Repo.DeleteSubscriber(c.Request.Context(), id); err != nil {
+		utils.Error("delete subscriber %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, model.APIResponse{Code: 500, Message: "删除失败"})
 		return
 	}

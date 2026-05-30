@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -83,13 +82,13 @@ func New(repo repository.Repository, insecureSkipVerify bool) *HealthChecker {
 func (hc *HealthChecker) Start(ctx context.Context) {
 	hc.wg.Add(1)
 	go hc.loop(ctx)
-	log.Println("[checker] started (interval: 1m)")
+	utils.Info("checker started (interval: 1m)")
 }
 
 func (hc *HealthChecker) Stop() {
 	close(hc.stop)
 	hc.wg.Wait()
-	log.Println("[checker] stopped")
+	utils.Info("checker stopped")
 }
 
 func (hc *HealthChecker) loop(ctx context.Context) {
@@ -125,14 +124,14 @@ func (hc *HealthChecker) loop(ctx context.Context) {
 func (hc *HealthChecker) checkAll(ctx context.Context) {
 	services, err := hc.repo.ListServices(ctx)
 	if err != nil {
-		log.Printf("[checker] list services error: %v", err)
+		utils.Info("checker list services error: %v", err)
 		return
 	}
 
 	// Load probe tasks and build serviceID -> probeTask map
 	probeTasks, err := hc.repo.ListProbeTasks(ctx)
 	if err != nil {
-		log.Printf("[checker] list probe tasks error: %v", err)
+		utils.Info("checker list probe tasks error: %v", err)
 		return
 	}
 	taskMap := make(map[int64]*model.ProbeTask, len(probeTasks))
@@ -178,13 +177,13 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 			Message:   message,
 		}
 		if err := hc.repo.CreateHeartbeat(ctx, hb); err != nil {
-			log.Printf("[checker] create heartbeat failed for service %d: %v", svc.ID, err)
+			utils.Info("checker create heartbeat failed for service %d: %v", svc.ID, err)
 		}
 
 		// Update daily record
 		daily, err := hc.repo.GetOrCreateServiceDaily(ctx, svc.ID, today)
 		if err != nil {
-			log.Printf("[checker] get/create daily failed for service %d: %v", svc.ID, err)
+			utils.Info("checker get/create daily failed for service %d: %v", svc.ID, err)
 			continue
 		}
 
@@ -196,7 +195,7 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		}
 		daily.TotalLatency += latency
 		if err := hc.repo.UpdateServiceDaily(ctx, daily); err != nil {
-			log.Printf("[checker] update daily failed for service %d: %v", svc.ID, err)
+			utils.Info("checker update daily failed for service %d: %v", svc.ID, err)
 		}
 
 		// Auto-incident logic with probe task config
@@ -244,7 +243,7 @@ func (hc *HealthChecker) trackProbeState(ctx context.Context, svc *model.Service
 				hc.mu.Lock()
 				st.consecutiveFailures = 0
 				hc.mu.Unlock()
-				log.Printf("[checker] skipping incident for service %s (under maintenance)", svc.Name)
+				utils.Info("checker skipping incident for service %s (under maintenance)", svc.Name)
 				return
 			}
 
@@ -253,7 +252,7 @@ func (hc *HealthChecker) trackProbeState(ctx context.Context, svc *model.Service
 				hc.mu.Lock()
 				st.autoIncidentID = existing.ID
 				hc.mu.Unlock()
-				log.Printf("[checker] linked existing incident #%d for service %s", existing.ID, svc.Name)
+				utils.Info("checker linked existing incident #%d for service %s", existing.ID, svc.Name)
 				return
 			}
 
@@ -266,7 +265,7 @@ func (hc *HealthChecker) trackProbeState(ctx context.Context, svc *model.Service
 func (hc *HealthChecker) tryResolveIncident(ctx context.Context, svc *model.Service, incID int64) {
 	inc, err := hc.repo.GetIncident(ctx, incID)
 	if err != nil {
-		log.Printf("[checker] incident #%d not found for resolve: %v", incID, err)
+		utils.Info("checker incident #%d not found for resolve: %v", incID, err)
 		return
 	}
 
@@ -303,7 +302,7 @@ func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service
 		Content:    fmt.Sprintf("%s 服务已恢复运行", svc.Name),
 	}
 	if err := hc.repo.CreateIncidentUpdate(ctx, update); err != nil {
-		log.Printf("[checker] failed to create incident update: %v", err)
+		utils.Info("checker failed to create incident update: %v", err)
 	}
 
 	inc.Status = "resolved"
@@ -328,7 +327,7 @@ func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service
 	}
 	hc.mu.Unlock()
 
-	log.Printf("[checker] resolved incident #%d for service %s", inc.ID, svc.Name)
+	utils.Info("checker resolved incident #%d for service %s", inc.ID, svc.Name)
 	notifyResolved(svc.Name)
 }
 
@@ -345,7 +344,7 @@ func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service,
 		UpdatedAt:        now,
 	}
 	if err := hc.repo.CreateIncident(ctx, inc); err != nil {
-		log.Printf("[checker] failed to create incident: %v", err)
+		utils.Info("checker failed to create incident: %v", err)
 		return
 	}
 
@@ -363,7 +362,7 @@ func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service,
 	st.autoIncidentID = inc.ID
 	hc.mu.Unlock()
 
-	log.Printf("[checker] auto-created incident #%d for service %s", inc.ID, svc.Name)
+	utils.Info("checker auto-created incident #%d for service %s", inc.ID, svc.Name)
 	notifyAlert(svc.Name, svc.URL, now)
 
 	// Try auto-merge with same-server incidents (check server's auto_merge setting)
@@ -382,7 +381,7 @@ func (hc *HealthChecker) tryAutoMerge(ctx context.Context, newInc *model.Inciden
 
 	siblings, err := hc.repo.ListIncidentsByServer(ctx, *task.ServerID)
 	if err != nil {
-		log.Printf("[checker] list incidents by server error: %v", err)
+		utils.Info("checker list incidents by server error: %v", err)
 		return
 	}
 
@@ -432,13 +431,13 @@ func (hc *HealthChecker) mergeIncidents(ctx context.Context, target, source *mod
 	}
 	hc.mu.Unlock()
 
-	log.Printf("[checker] merged incident #%d as child of #%d", source.ID, target.ID)
+	utils.Info("checker merged incident #%d as child of #%d", source.ID, target.ID)
 }
 
 func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
 	maintenances, err := hc.repo.ListMaintenances(ctx)
 	if err != nil {
-		log.Printf("[checker] list maintenances error: %v", err)
+		utils.Info("checker list maintenances error: %v", err)
 		return
 	}
 
@@ -455,16 +454,16 @@ func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
 		if m.Status == "scheduled" && !now.Before(start) {
 			m.Status = "in_progress"
 			if err := hc.repo.UpdateMaintenance(ctx, m); err != nil {
-				log.Printf("[checker] failed to update maintenance #%d to in_progress: %v", m.ID, err)
+				utils.Info("checker failed to update maintenance #%d to in_progress: %v", m.ID, err)
 			} else {
-				log.Printf("[checker] auto-updated maintenance #%d (%s) to in_progress", m.ID, m.Title)
+				utils.Info("checker auto-updated maintenance #%d (%s) to in_progress", m.ID, m.Title)
 			}
 		} else if m.Status == "in_progress" && !now.Before(end) {
 			m.Status = "completed"
 			if err := hc.repo.UpdateMaintenance(ctx, m); err != nil {
-				log.Printf("[checker] failed to update maintenance #%d to completed: %v", m.ID, err)
+				utils.Info("checker failed to update maintenance #%d to completed: %v", m.ID, err)
 			} else {
-				log.Printf("[checker] auto-updated maintenance #%d (%s) to completed", m.ID, m.Title)
+				utils.Info("checker auto-updated maintenance #%d (%s) to completed", m.ID, m.Title)
 			}
 		}
 	}
@@ -478,7 +477,7 @@ func notifyAlert(name, url, ts string) {
 	subject := fmt.Sprintf("服务异常告警: %s", name)
 	body := fmt.Sprintf("服务 %s (%s) 连续检测失败，已自动创建故障事件。\n\n检测时间: %s", name, url, ts)
 	if err := utils.SendAlert(subject, body); err != nil {
-		log.Printf("[checker] send alert failed: %v", err)
+		utils.Info("checker send alert failed: %v", err)
 	}
 }
 
@@ -490,7 +489,7 @@ func notifyResolved(name string) {
 	subject := fmt.Sprintf("服务恢复通知: %s", name)
 	body := fmt.Sprintf("服务 %s 已恢复运行。", name)
 	if err := utils.SendAlert(subject, body); err != nil {
-		log.Printf("[checker] send alert failed: %v", err)
+		utils.Info("checker send alert failed: %v", err)
 	}
 }
 
@@ -536,16 +535,16 @@ func (hc *HealthChecker) checkTCP(svc *model.Service) (int, int, string) {
 func (hc *HealthChecker) cleanup(ctx context.Context) {
 	beforeDaily := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
 	if err := hc.repo.DeleteOldServiceDailies(ctx, beforeDaily); err != nil {
-		log.Printf("[checker] cleanup dailies failed: %v", err)
+		utils.Info("checker cleanup dailies failed: %v", err)
 	} else {
-		log.Println("[checker] cleaned up daily records older than 90 days")
+		utils.Info("checker cleaned up daily records older than 90 days")
 	}
 
 	beforeHB := time.Now().AddDate(0, 0, -7).UTC().Format("2006-01-02T15:04:05Z")
 	if err := hc.repo.DeleteOldHeartbeats(ctx, beforeHB); err != nil {
-		log.Printf("[checker] cleanup heartbeats failed: %v", err)
+		utils.Info("checker cleanup heartbeats failed: %v", err)
 	} else {
-		log.Println("[checker] cleaned up heartbeats older than 7 days")
+		utils.Info("checker cleaned up heartbeats older than 7 days")
 	}
 }
 

@@ -2,7 +2,8 @@
 
 **基础信息**
 
-- **Base URL**: `/api/v1`
+- **Public Base URL**: `/api/v1`
+- **Feed Base URL**: `/feed`
 - **Admin Base URL**: `/api/v1/admin`
 - **格式**: JSON
 
@@ -64,15 +65,18 @@ GET /api/v1/health
 POST /api/v1/subscribe
 ```
 
-使用邮箱订阅服务状态通知。
+使用邮箱订阅服务状态通知，可选指定订阅哪些服务。
 
 **请求**
 
 ```json
 {
-  "email": "user@example.com"
+  "email": "user@example.com",
+  "services": [1, 2, 3]
 }
 ```
+
+`services` 可选，留空或省略则订阅所有服务。
 
 **响应**
 
@@ -83,7 +87,22 @@ POST /api/v1/subscribe
 }
 ```
 
-邮箱已订阅时返回 200，message 为 `"该邮箱已订阅"`。
+邮箱已订阅时返回 200，message 为 `"该邮箱已订阅"`（同时更新订阅的服务列表）。
+
+---
+
+### RSS/Atom 订阅源
+
+```
+GET /feed/rss
+GET /feed/atom
+```
+
+返回最近 20 条事件的状态更新订阅源（RSS 2.0 / Atom 1.0 格式），可直接在 RSS 阅读器中订阅。
+
+**Content-Type**: `application/rss+xml` / `application/atom+xml`
+
+无需鉴权。
 
 ---
 
@@ -104,10 +123,24 @@ GET /api/v1/site-config
   "data": {
     "site_name": "LumiPulse",
     "site_icon": "https://example.com/icon.png",
-    "email_enabled": "true"
+    "email_enabled": "true",
+    "show_admin_footer_button": "true",
+    "custom_footer": "",
+    "sub_enable_email": "true",
+    "sub_enable_rss": "true",
+    "sub_enable_atom": "true"
   }
 }
 ```
+
+| 字段 | 说明 |
+| --- | --- |
+| `email_enabled` | SMTP 是否已配置并启用邮件通知 |
+| `show_admin_footer_button` | 页脚是否显示"管理后台"链接 |
+| `custom_footer` | 自定义页脚 HTML 内容（空则显示默认页脚） |
+| `sub_enable_email` | 邮件订阅方式是否开启 |
+| `sub_enable_rss` | RSS 订阅方式是否开启 |
+| `sub_enable_atom` | Atom 订阅方式是否开启 |
 
 ---
 
@@ -406,6 +439,8 @@ GET /api/v1/incidents?page=1&limit=20
 
 `status` 取值：`investigating`（调查中）、`identified`（已确认）、`monitoring`（监控中）、`resolved`（已解决）
 
+`resolvedAt`：事件首次标记为已解决的时间（RFC3339 格式），仅当 `status` 为 `resolved` 时存在。编辑事件不会改变此值。旧数据可能不包含此字段。
+
 ---
 
 ### 获取维护计划
@@ -619,7 +654,7 @@ GET /api/v1/admin/settings
   "data": {
     "site_name": "LumiPulse",
     "site_icon": "",
-    "admin_email": "admin@example.com",
+    "admin_email": "",
     "admin_name": "admin",
     "allow_origin": "http://localhost:5173",
     "smtp_host": "",
@@ -628,7 +663,12 @@ GET /api/v1/admin/settings
     "smtp_encryption": "",
     "email_enabled": "true",
     "notify_services": "",
-    "notify_emails": ""
+    "notify_emails": "",
+    "show_admin_footer_button": "true",
+    "custom_footer": "",
+    "sub_enable_email": "true",
+    "sub_enable_rss": "true",
+    "sub_enable_atom": "true"
   }
 }
 ```
@@ -900,6 +940,44 @@ GET /api/v1/admin/incidents?page=1&limit=20
 
 同公共接口 `/api/v1/incidents`，返回格式一致。
 
+#### 获取事件详情（管理用）
+
+```
+GET /api/v1/admin/incidents/:id
+```
+
+返回指定事件的完整信息，包含所有进展更新（含内部记录）和子事件列表。
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "serviceId": 1,
+    "title": "API 服务中断",
+    "impact": "critical",
+    "status": "investigating",
+    "affectedServices": "1,2,3",
+    "parentId": null,
+    "createdAt": "2026-05-08T18:00:00Z",
+    "updatedAt": "2026-05-08T18:45:00Z",
+    "updates": [
+      { "id": 1, "incidentId": 1, "status": "investigating", "content": "...", "isInternal": false, "createdAt": "..." }
+    ],
+    "children": [
+      { "id": 2, "serviceId": 2, "title": "子事件", "impact": "major", "status": "identified", ... }
+    ]
+  }
+}
+```
+
+`children` 为已合并到该事件的子事件列表。`updates` 中包含 `isInternal` 字段，标记是否为系统内部记录。
+
+---
+
 #### 添加事件进展更新
 
 ```
@@ -990,6 +1068,41 @@ DELETE /api/v1/admin/incidents/:id
 {
   "code": 200,
   "message": "Incident deleted"
+}
+```
+
+---
+
+#### 合并事件
+
+```
+POST /api/v1/admin/incidents/:id/merge
+```
+
+将指定事件合并为当前事件的子事件。被合并的事件状态会跟随主事件同步变更。
+
+**请求**
+
+```json
+{
+  "sourceId": 2
+}
+```
+
+#### 拆分事件
+
+```
+POST /api/v1/admin/incidents/:id/split
+```
+
+将指定子事件从主事件中拆分为独立事件。
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "Incident split"
 }
 ```
 
@@ -1175,6 +1288,187 @@ DELETE /api/v1/admin/api-keys/:id
 
 ---
 
+### 服务器管理
+
+#### 获取服务器列表
+
+```
+GET /api/v1/admin/servers
+```
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": [
+    {
+      "id": 1,
+      "name": "Web 服务器组",
+      "description": "前端 Web 集群",
+      "autoMerge": true,
+      "autoMergeThreshold": 2,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-05-09T00:00:00Z"
+    }
+  ]
+}
+```
+
+#### 创建服务器
+
+```
+POST /api/v1/admin/servers
+```
+
+**请求**
+
+```json
+{
+  "name": "Web 服务器组",
+  "description": "前端 Web 集群",
+  "autoMerge": true,
+  "autoMergeThreshold": 2
+}
+```
+
+#### 更新服务器
+
+```
+PUT /api/v1/admin/servers/:id
+```
+
+#### 删除服务器
+
+```
+DELETE /api/v1/admin/servers/:id
+```
+
+---
+
+### 探测任务管理
+
+#### 获取探测任务列表
+
+```
+GET /api/v1/admin/probe-tasks
+```
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": [
+    {
+      "id": 1,
+      "serviceId": 1,
+      "serverId": 1,
+      "triggerCount": 5,
+      "isActive": true,
+      "serviceName": "API 服务",
+      "serverName": "Web 服务器组",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-05-09T00:00:00Z"
+    }
+  ]
+}
+```
+
+#### 创建探测任务
+
+```
+POST /api/v1/admin/probe-tasks
+```
+
+**请求**
+
+```json
+{
+  "serviceId": 1,
+  "serverId": 1,
+  "triggerCount": 5
+}
+```
+
+服务创建时自动创建默认探测任务（triggerCount=5）。
+
+#### 更新探测任务
+
+```
+PUT /api/v1/admin/probe-tasks/:id
+```
+
+**请求**
+
+```json
+{
+  "serverId": 1,
+  "triggerCount": 3,
+  "isActive": true
+}
+```
+
+#### 删除探测任务
+
+```
+DELETE /api/v1/admin/probe-tasks/:id
+```
+
+---
+
+### 数据导入导出
+
+#### 导出数据
+
+```
+GET /api/v1/admin/export
+```
+
+导出服务、事件、事件更新、维护计划和系统设置（不含日志和探测记录）。
+
+**响应** (文件下载)
+
+Content-Disposition 头中包含文件名 `lumipulse-export-YYYY-MM-DD.json`。
+
+```json
+{
+  "version": 1,
+  "exportedAt": "2026-05-30T12:00:00Z",
+  "services": [...],
+  "incidents": [...],
+  "incidentUpdates": [...],
+  "maintenances": [...],
+  "settings": {
+    "site_name": "LumiPulse",
+    ...
+  }
+}
+```
+
+#### 导入数据
+
+```
+POST /api/v1/admin/import?confirm=true
+```
+
+导入将覆盖现有服务、事件、维护计划和系统设置，此操作不可撤销。请求必须包含 `?confirm=true` 参数确认。
+
+**请求体**: 使用导出生成的 JSON 文件内容。
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "导入成功"
+}
+```
+
+---
+
 ### 订阅者管理
 
 #### 获取订阅者列表
@@ -1194,12 +1488,15 @@ GET /api/v1/admin/subscribers
       "id": 1,
       "email": "user@example.com",
       "verified": true,
+      "subscribedServices": "1,2,3",
       "createdAt": "2026-05-09T00:00:00Z",
       "updatedAt": "2026-05-09T00:00:00Z"
     }
   ]
 }
 ```
+
+`subscribedServices`：逗号分隔的服务 ID 列表，空字符串表示订阅所有服务。
 
 #### 删除订阅者
 

@@ -3,6 +3,7 @@ package http
 import (
 	"fmt"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,6 +40,7 @@ func (h *Handler) CreateIncident(c *gin.Context) {
 	}
 
 	if err := h.Repo.CreateIncident(c.Request.Context(), inc); err != nil {
+		utils.Error("create incident failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create incident"})
 		return
 	}
@@ -218,6 +220,7 @@ func (h *Handler) UpdateIncident(c *gin.Context) {
 	}
 
 	if err := h.Repo.UpdateIncident(c.Request.Context(), inc); err != nil {
+		utils.Error("update incident %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to update incident"})
 		return
 	}
@@ -254,6 +257,7 @@ func (h *Handler) DeleteIncident(c *gin.Context) {
 	}
 
 	if err := h.Repo.DeleteIncident(c.Request.Context(), id); err != nil {
+		utils.Error("delete incident %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete incident"})
 		return
 	}
@@ -277,6 +281,7 @@ func (h *Handler) AdminListIncidents(c *gin.Context) {
 
 	incidents, total, err := h.Repo.ListIncidents(c.Request.Context(), page, limit)
 	if err != nil {
+		utils.Error("list incidents failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch incidents"})
 		return
 	}
@@ -385,6 +390,7 @@ func (h *Handler) MergeIncident(c *gin.Context) {
 	// Set source as child of target
 	source.ParentID = &target.ID
 	if err := h.Repo.UpdateIncident(c.Request.Context(), source); err != nil {
+		utils.Error("merge incident failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to merge incidents"})
 		return
 	}
@@ -447,6 +453,7 @@ func (h *Handler) SplitIncident(c *gin.Context) {
 	// Clear parent_id to split out
 	child.ParentID = nil
 	if err := h.Repo.UpdateIncident(c.Request.Context(), child); err != nil {
+		utils.Error("split incident %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to split incident"})
 		return
 	}

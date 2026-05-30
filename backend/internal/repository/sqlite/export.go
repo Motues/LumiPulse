@@ -48,10 +48,10 @@ func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error
 		inc.ID = 0
 		inc.ParentID = nil
 
-		query := `INSERT INTO Incident (service_id, title, impact, status, affected_services, parent_id, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		query := `INSERT INTO Incident (service_id, title, impact, status, affected_services, parent_id, resolved_at, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		res, err := tx.ExecContext(ctx, query, inc.ServiceID, inc.Title, inc.Impact, inc.Status,
-			inc.AffectedServices, nil, inc.CreatedAt, inc.UpdatedAt)
+			inc.AffectedServices, nil, inc.ResolvedAt, inc.CreatedAt, inc.UpdatedAt)
 		if err != nil {
 			return err
 		}

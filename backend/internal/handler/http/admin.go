@@ -1,7 +1,6 @@
 package http
 
 import (
-	"log"
 	"lumipluse-backend/internal/model"
 	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
@@ -14,7 +13,7 @@ func (h *Handler) Login(c *gin.Context) {
 	ip := utils.GetClientIP(c)
 
 	if utils.Limiter.IsIPBlocked(ip) {
-		log.Printf("[WARN] Blocked IP attempted to login: %s", ip)
+		utils.Warn("Blocked IP attempted to login: %s", ip)
 		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "IP is blocked due to multiple failed attempts"})
 		return
 	}
@@ -27,7 +26,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	if !utils.CheckAdminCredentials(req.Username, req.Password) {
 		utils.Limiter.RecordAttempt(ip)
-		log.Printf("[WARN] Login failed for IP: %s", ip)
+		utils.Warn("Login failed for IP: %s", ip)
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "Invalid username or password"})
 		return
 	}
@@ -37,6 +36,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	needsSetup := utils.IsDefaultAdmin()
 
+	utils.Info("login successful: username=%s ip=%s", req.Username, utils.GetClientIP(c))
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Login successful",
@@ -82,6 +82,7 @@ func (h *Handler) Setup(c *gin.Context) {
 	}
 
 	if err := utils.ChangeAdminPassword(req.Username, req.Password); err != nil {
+		utils.Error("setup failed to save credentials: %v", err)
 		c.JSON(http.StatusInternalServerError, model.APIResponse{
 			Code:    500,
 			Message: "Failed to save credentials",
@@ -89,6 +90,7 @@ func (h *Handler) Setup(c *gin.Context) {
 		return
 	}
 
+	utils.Info("admin setup completed: username=%s", req.Username)
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Setup completed, please login again",
@@ -152,10 +154,12 @@ func (h *Handler) UpdateAdminProfile(c *gin.Context) {
 	}
 
 	if err := utils.ChangeAdminPassword(finalName, finalPass); err != nil {
+		utils.Error("update profile failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "保存失败"})
 		return
 	}
 
+	utils.Info("profile updated: username=%s", finalName)
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "已更新",
@@ -266,10 +270,11 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 
 	for key, value := range body {
 		if err := utils.SetSetting(key, value); err != nil {
-			log.Printf("[ERROR] Failed to update setting %s: %v", key, err)
+			utils.Error("Failed to update setting %s: %v", key, err)
 		}
 	}
 
+	utils.Info("settings updated by admin")
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Settings updated",
@@ -317,10 +322,12 @@ LumiPulse &mdash; 服务监控系统
 </html>`
 
 	if err := utils.SendHTMLMail(req.To, subject, body); err != nil {
+		utils.Error("test email to %s failed: %v", req.To, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "发送失败: " + err.Error()})
 		return
 	}
 
+	utils.Info("test email sent to %s", req.To)
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "测试邮件发送成功",

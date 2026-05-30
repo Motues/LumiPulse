@@ -2,9 +2,9 @@ package http
 
 import (
 	"fmt"
-	"log"
 	"lumipluse-backend/internal/model"
 	"net/http"
+	"lumipluse-backend/internal/pkg/utils"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -56,6 +56,7 @@ func (h *Handler) CreateService(c *gin.Context) {
 		}
 
 		if err := h.Repo.CreateService(c.Request.Context(), svc); err != nil {
+		utils.Error("create service failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create service"})
 		return
 	}
@@ -67,7 +68,7 @@ func (h *Handler) CreateService(c *gin.Context) {
 		IsActive:     true,
 	}
 	if err := h.Repo.CreateProbeTask(c.Request.Context(), probeTask); err != nil {
-		log.Printf("[handler] failed to auto-create probe task for service %d: %v", svc.ID, err)
+		utils.Error("failed to auto-create probe task for service %d: %v", svc.ID, err)
 	}
 
 	auditLog("service.create", fmt.Sprintf("name=%s url=%s", svc.Name, svc.URL))
@@ -127,6 +128,7 @@ func (h *Handler) UpdateService(c *gin.Context) {
 	svc.SortOrder = req.SortOrder
 
 	if err := h.Repo.UpdateService(c.Request.Context(), svc); err != nil {
+		utils.Error("update service %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to update service"})
 		return
 	}
@@ -152,6 +154,7 @@ func (h *Handler) DeleteService(c *gin.Context) {
 	svc, _ := h.Repo.GetService(c.Request.Context(), id)
 
 	if err := h.Repo.DeleteService(c.Request.Context(), id); err != nil {
+		utils.Error("delete service %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete service"})
 		return
 	}
@@ -176,6 +179,7 @@ func (h *Handler) AdminReorderServices(c *gin.Context) {
 
 	for _, item := range req.Services {
 		if err := h.Repo.UpdateServiceSortOrder(c.Request.Context(), item.ID, item.SortOrder); err != nil {
+			utils.Error("reorder services failed: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to reorder services"})
 			return
 		}
@@ -193,6 +197,7 @@ func (h *Handler) AdminReorderServices(c *gin.Context) {
 func (h *Handler) AdminListServices(c *gin.Context) {
 	services, err := h.Repo.ListServices(c.Request.Context())
 	if err != nil {
+		utils.Warn("list services failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch services"})
 		return
 	}

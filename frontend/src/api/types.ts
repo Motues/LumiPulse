@@ -55,6 +55,7 @@ export interface Incident {
   status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
   affectedServices: string
   parentId?: number
+  resolvedAt?: string
   createdAt: string
   updatedAt: string
   updates: IncidentUpdate[]

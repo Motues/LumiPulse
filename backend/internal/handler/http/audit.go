@@ -2,7 +2,7 @@ package http
 
 import (
 	"fmt"
-	"log"
+	"lumipluse-backend/internal/pkg/utils"
 	"time"
 )
 
@@ -13,5 +13,5 @@ func auditLog(action string, detail string) {
 		action,
 		detail,
 	)
-	log.Println(entry)
+	utils.Info("audit: %s", entry)
 }

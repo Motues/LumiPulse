@@ -3,6 +3,7 @@ package http
 import (
 	"fmt"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strconv"
 
@@ -13,6 +14,7 @@ import (
 func (h *Handler) ListProbeTasks(c *gin.Context) {
 	tasks, err := h.Repo.ListProbeTasks(c.Request.Context())
 	if err != nil {
+		utils.Warn("list probe tasks failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch probe tasks"})
 		return
 	}
@@ -53,6 +55,7 @@ func (h *Handler) CreateProbeTask(c *gin.Context) {
 		IsActive:     true,
 	}
 	if err := h.Repo.CreateProbeTask(c.Request.Context(), task); err != nil {
+		utils.Error("create probe task failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create probe task"})
 		return
 	}
@@ -96,6 +99,7 @@ func (h *Handler) UpdateProbeTask(c *gin.Context) {
 	task.ServerID = req.ServerID
 
 	if err := h.Repo.UpdateProbeTask(c.Request.Context(), task); err != nil {
+		utils.Error("update probe task %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to update probe task"})
 		return
 	}
@@ -119,6 +123,7 @@ func (h *Handler) DeleteProbeTask(c *gin.Context) {
 	}
 
 	if err := h.Repo.DeleteProbeTask(c.Request.Context(), id); err != nil {
+		utils.Error("delete probe task %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete probe task"})
 		return
 	}

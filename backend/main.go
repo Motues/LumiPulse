@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,7 +20,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const Version = "0.1.5"
+const Version = "0.1.7"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -42,20 +41,20 @@ func main() {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("无法加载配置: %v", err)
+		utils.Fatal("无法加载配置: %v", err)
 	}
 
 	dbPath := "./data/data.db"
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		log.Fatalf("无法创建数据库目录: %v", err)
+		utils.Fatal("无法创建数据库目录: %v", err)
 	}
 
 	db, err := sqlx.Connect("sqlite", dbPath)
 	if err != nil {
-		log.Fatalf("数据库连接失败: %v", err)
+		utils.Fatal("数据库连接失败: %v", err)
 	}
 	if err := sqlite.InitSchema(db); err != nil {
-		log.Fatalf("初始化表结构失败: %v", err)
+		utils.Fatal("初始化表结构失败: %v", err)
 	}
 
 	utils.InitSettingsDB(db)
@@ -66,7 +65,8 @@ func main() {
 	hc := checker.New(repo, cfg.InsecureSkipVerify)
 	hc.Start(context.Background())
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {
@@ -120,6 +120,6 @@ func main() {
 	fmt.Printf("版本: %s\n", Version)
 
 	if err := r.Run(addr); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+		utils.Fatal("服务器启动失败: %v", err)
 	}
 }

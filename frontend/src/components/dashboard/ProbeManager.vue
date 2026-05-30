@@ -352,7 +352,7 @@ onMounted(load)
                 @click="serverForm.autoMerge = !serverForm.autoMerge"
                 :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors', serverForm.autoMerge ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600']"
               >
-                <span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', serverForm.autoMerge ? 'translate-x-4.5' : 'translate-x-0.5']" />
+                <span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', serverForm.autoMerge ? 'translate-x-[18px]' : 'translate-x-0.5']" />
               </button>
               <span class="text-sm" style="color: var(--text-color); opacity: 0.5;">启用后，同服务器服务同时异常时将自动合并为一个事件</span>
             </div>
@@ -426,7 +426,7 @@ onMounted(load)
               @click="createProbeForm.isActive = !createProbeForm.isActive"
               :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors', createProbeForm.isActive ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600']"
             >
-              <span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', createProbeForm.isActive ? 'translate-x-4.5' : 'translate-x-0.5']" />
+              <span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', createProbeForm.isActive ? 'translate-x-[18px]' : 'translate-x-0.5']" />
             </button>
           </div>
         </div>

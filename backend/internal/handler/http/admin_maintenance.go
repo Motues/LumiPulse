@@ -2,6 +2,7 @@ package http
 
 import (
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strconv"
 
@@ -30,6 +31,7 @@ func (h *Handler) CreateMaintenance(c *gin.Context) {
 	}
 
 	if err := h.Repo.CreateMaintenance(c.Request.Context(), m); err != nil {
+		utils.Error("create maintenance failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create maintenance"})
 		return
 	}
@@ -82,6 +84,7 @@ func (h *Handler) UpdateMaintenance(c *gin.Context) {
 	}
 
 	if err := h.Repo.UpdateMaintenance(c.Request.Context(), m); err != nil {
+		utils.Error("update maintenance %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to update maintenance"})
 		return
 	}
@@ -103,6 +106,7 @@ func (h *Handler) DeleteMaintenance(c *gin.Context) {
 	}
 
 	if err := h.Repo.DeleteMaintenance(c.Request.Context(), id); err != nil {
+		utils.Error("delete maintenance %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete maintenance"})
 		return
 	}
@@ -117,6 +121,7 @@ func (h *Handler) DeleteMaintenance(c *gin.Context) {
 func (h *Handler) AdminListMaintenances(c *gin.Context) {
 	maintenances, err := h.Repo.ListMaintenances(c.Request.Context())
 	if err != nil {
+		utils.Warn("list maintenances failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch maintenances"})
 		return
 	}

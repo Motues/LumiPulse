@@ -3,6 +3,7 @@ package http
 import (
 	"fmt"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strconv"
 
@@ -13,6 +14,7 @@ import (
 func (h *Handler) ListServers(c *gin.Context) {
 	servers, err := h.Repo.ListServers(c.Request.Context())
 	if err != nil {
+		utils.Warn("list servers failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch servers"})
 		return
 	}
@@ -40,6 +42,7 @@ func (h *Handler) CreateServer(c *gin.Context) {
 		svr.AutoMergeThreshold = req.AutoMergeThreshold
 	}
 	if err := h.Repo.CreateServer(c.Request.Context(), svr); err != nil {
+		utils.Error("create server failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create server"})
 		return
 	}
@@ -88,6 +91,7 @@ func (h *Handler) UpdateServer(c *gin.Context) {
 		}
 
 	if err := h.Repo.UpdateServer(c.Request.Context(), svr); err != nil {
+		utils.Error("update server %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to update server"})
 		return
 	}
@@ -113,6 +117,7 @@ func (h *Handler) DeleteServer(c *gin.Context) {
 	svr, _ := h.Repo.GetServer(c.Request.Context(), id)
 
 	if err := h.Repo.DeleteServer(c.Request.Context(), id); err != nil {
+		utils.Error("delete server %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete server"})
 		return
 	}

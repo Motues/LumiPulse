@@ -69,7 +69,6 @@ func InitSchema(db *sqlx.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_incident_status ON Incident(status);
 	CREATE INDEX IF NOT EXISTS idx_incident_service_status ON Incident(service_id, status);
-	CREATE INDEX IF NOT EXISTS idx_incident_parent ON Incident(parent_id);
 
 	CREATE TABLE IF NOT EXISTS Incident_Update (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,9 +154,12 @@ func InitSchema(db *sqlx.DB) error {
 		`ALTER TABLE Incident_Update ADD COLUMN is_internal INTEGER DEFAULT 0`,
 		`ALTER TABLE Server ADD COLUMN auto_merge INTEGER DEFAULT 1`,
 		`ALTER TABLE Server ADD COLUMN auto_merge_threshold INTEGER DEFAULT 1`,
-		`ALTER TABLE Incident ADD COLUMN parent_id INTEGER REFERENCES Incident(id) ON DELETE SET NULL`,
+		`ALTER TABLE Incident ADD COLUMN parent_id INTEGER DEFAULT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_incident_parent ON Incident(parent_id)`,
 		`ALTER TABLE Service ADD COLUMN show_on_homepage INTEGER DEFAULT 1`,
-			`ALTER TABLE Subscriber ADD COLUMN subscribed_services TEXT DEFAULT ''`,
+		`ALTER TABLE Subscriber ADD COLUMN subscribed_services TEXT DEFAULT ''`,
+		`ALTER TABLE Incident ADD COLUMN resolved_at DATETIME DEFAULT NULL`,
+		`UPDATE Incident SET resolved_at = (SELECT MAX(created_at) FROM Incident_Update WHERE incident_id = Incident.id AND status = 'resolved') WHERE status = 'resolved' AND resolved_at IS NULL`,
 	}
 	for _, m := range migrations {
 		db.Exec(m) // ignore errors (column may already exist)

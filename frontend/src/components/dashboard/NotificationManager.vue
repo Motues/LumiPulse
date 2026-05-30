@@ -128,8 +128,7 @@ onMounted(load)
               type="button"
               @click="settings['email_enabled'] = settings['email_enabled'] === 'true' ? 'false' : 'true'"
               class="relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 transition-colors"
-              :class="settings['email_enabled'] === 'true' ? 'bg-emerald-500' : ''"
-              :style="settings['email_enabled'] !== 'true' ? { opacity: 0.3 } : {}"
+              :class="settings['email_enabled'] === 'true' ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'"
             >
               <span
                 class="inline-block h-4 w-4 transform rounded-full bg-white transition"

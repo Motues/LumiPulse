@@ -413,28 +413,6 @@ onMounted(async () => {
             </button>
           </div>
         </div>
-              @click="selectedServices = (selectedServices.length === servicesList.length ? [] : servicesList.map(s => s.id))"
-              class="text-xs mb-2 transition-colors"
-              style="color: var(--text-color); opacity: 0.5;"
-            >{{ selectedServices.length === servicesList.length ? '取消全选' : '全选' }}</button>
-            <div class="max-h-40 overflow-y-auto space-y-1.5 thin-scroll p-1">
-              <label
-                v-for="svc in servicesList"
-                :key="svc.id"
-                class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-colors hover:bg-[var(--button-hover-color)]"
-              >
-                <input
-                  type="checkbox"
-                  :checked="selectedServices.includes(svc.id)"
-                  @change="toggleService(svc.id)"
-                  class="rounded border-gray-300 text-emerald-500 focus:ring-emerald-500"
-                />
-                <span style="color: var(--text-color);">{{ svc.name }}</span>
-              </label>
-            </div>
-            <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">留空则订阅所有服务</p>
-          </div>
-        </div>
 
         <p v-if="subscribeMsg" :class="['text-xs mt-3', subscribeMsgType === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500']">{{ subscribeMsg }}</p>
         <button

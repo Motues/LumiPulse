@@ -115,7 +115,7 @@ func (h *Handler) buildRSS(baseURL, siteName string, incidents []*model.Incident
     <description>%s 系统状态与故障事件更新</description>
     <language>zh-CN</language>
     <lastBuildDate>%s</lastBuildDate>
-    <atom:link href="%s/api/v1/feed/rss" rel="self" type="application/rss+xml"/>
+    <atom:link href="%s/feed/rss" rel="self" type="application/rss+xml"/>
 %s  </channel>
 </rss>`, siteName, baseURL, siteName, now, baseURL, items.String())
 }
@@ -170,7 +170,7 @@ func (h *Handler) buildAtom(baseURL, siteName string, incidents []*model.Inciden
   <title>%s - 状态更新</title>
   <subtitle>%s 系统状态与故障事件更新</subtitle>
   <link href="%s" rel="alternate" type="text/html"/>
-  <link href="%s/api/v1/feed/atom" rel="self" type="application/atom+xml"/>
+  <link href="%s/feed/atom" rel="self" type="application/atom+xml"/>
   <id>%s/</id>
   <updated>%s</updated>
 %s</feed>`, siteName, siteName, baseURL, baseURL, baseURL, now, entries.String())

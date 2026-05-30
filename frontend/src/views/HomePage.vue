@@ -169,7 +169,7 @@ const incidentsByDate = computed(() => {
     for (const [dateStr, list] of map) {
       if (incDate > dateStr) continue
       if (inc.status === 'resolved') {
-        const resolvedDate = inc.updatedAt.slice(0, 10)
+        const resolvedDate = inc.resolvedAt ? inc.resolvedAt.slice(0, 10) : inc.updatedAt.slice(0, 10)
         if (resolvedDate < dateStr) continue
       }
       list.push(inc)

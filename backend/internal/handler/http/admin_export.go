@@ -54,6 +54,7 @@ func (h *Handler) AdminExport(c *gin.Context) {
 		Settings:        settings,
 	}
 
+	utils.Info("data exported: %d services, %d incidents, %d maintenances", len(services), len(incidents), len(maintenances))
 	c.Header("Content-Type", "application/json")
 	c.Header("Content-Disposition", "attachment; filename=lumipulse-export-"+time.Now().Format("2006-01-02")+".json")
 	c.JSON(http.StatusOK, data)

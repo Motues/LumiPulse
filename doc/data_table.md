@@ -15,6 +15,7 @@
 | `status` | TEXT | DEFAULT 'operational' | 当前状态：`operational`, `degraded`, `outage` |
 | `is_active` | INTEGER | DEFAULT 1 | 是否启用监控（1 为启用，0 为禁用） |
 | `sort_order` | INTEGER | DEFAULT 0 | 前端展示排序权重 |
+| `show_on_homepage` | INTEGER | DEFAULT 1 | 是否在首页展示（1 为展示，0 为隐藏） |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
@@ -67,10 +68,13 @@
 | `title` | TEXT | NOT NULL | 事件标题 |
 | `impact` | TEXT | NOT NULL | 影响等级：`minor`, `major`, `critical` |
 | `status` | TEXT | DEFAULT 'investigating' | 事件状态：`investigating`, `identified`, `monitoring`, `resolved` |
+| `affected_services` | TEXT | DEFAULT '' | 合并事件影响的额外服务 ID 列表（逗号分隔） |
+| `parent_id` | INTEGER | REFERENCES `Incident`(`id`) ON DELETE SET NULL | 父事件 ID（合并的子事件标识） |
+| `resolved_at` | DATETIME | DEFAULT NULL | 首次标记为已解决的时间（固定不变） |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 事件开始时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
-索引：`idx_incident_status(status)`、`idx_incident_service_status(service_id, status)`
+索引：`idx_incident_status(status)`、`idx_incident_service_status(service_id, status)`、`idx_incident_parent(parent_id)`
 
 ---
 
@@ -84,6 +88,7 @@
 | `incident_id` | INTEGER | REFERENCES `Incident`(`id`) ON DELETE CASCADE | 关联的事件 ID |
 | `status` | TEXT | NOT NULL | 该阶段状态（同 Incident 状态枚举） |
 | `content` | TEXT | NOT NULL | 更新的内容描述 |
+| `is_internal` | INTEGER | DEFAULT 0 | 是否为系统内部记录（合并/拆分操作，1 为内部） |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 更新时间 |
 
 索引：`idx_incident_update_incident(incident_id)`
@@ -118,6 +123,7 @@
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
 | `email` | TEXT | UNIQUE NOT NULL | 订阅邮箱地址 |
 | `verified` | INTEGER | DEFAULT 0 | 是否已验证（1 为已验证，0 为未验证） |
+| `subscribed_services` | TEXT | DEFAULT '' | 订阅的服务 ID 列表（逗号分隔，空=全部） |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 订阅时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
@@ -151,6 +157,11 @@
 | `email_enabled` | 是否启用邮件通知 | true, false |
 | `notify_services` | 通知关联的服务 ID | 1,2,3 |
 | `notify_emails` | 通知接收邮箱列表 | a@example.com,b@example.com |
+| `show_admin_footer_button` | 页脚是否显示管理后台链接 | true, false |
+| `custom_footer` | 自定义页脚 HTML 内容 | `<a href="...">我的站点</a>` |
+| `sub_enable_email` | 邮件订阅方式开关 | true, false |
+| `sub_enable_rss` | RSS 订阅方式开关 | true, false |
+| `sub_enable_atom` | Atom 订阅方式开关 | true, false |
 
 ---
 
@@ -171,3 +182,37 @@
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 
 索引：`idx_apikey_key(key)`
+
+---
+
+## 表：`Server`
+
+逻辑分组，将多个探测任务归组到同一服务器下，支持自动合并事件。
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
+| `name` | TEXT | NOT NULL | 服务器名称 |
+| `description` | TEXT | DEFAULT '' | 描述 |
+| `auto_merge` | INTEGER | DEFAULT 1 | 是否自动合并事件（1 为启用） |
+| `auto_merge_threshold` | INTEGER | DEFAULT 1 | 同时异常的服务数达到此阈值时自动合并 |
+| `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
+| `updated_at` | DATETIME | DEFAULT (datetime('now')) | 更新时间 |
+
+---
+
+## 表：`ProbeTask`
+
+定义对特定服务执行健康检查的探测任务，可关联到服务器。
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
+| `service_id` | INTEGER | UNIQUE REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID（一对一） |
+| `server_id` | INTEGER | REFERENCES `Server`(`id`) ON DELETE SET NULL | 关联的服务器 ID（可选） |
+| `trigger_count` | INTEGER | DEFAULT 5 | 连续失败次数阈值，超过则触发事件 |
+| `is_active` | INTEGER | DEFAULT 1 | 是否启用探测 |
+| `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
+| `updated_at` | DATETIME | DEFAULT (datetime('now')) | 更新时间 |
+
+索引：`idx_probe_service(service_id)`、`idx_probe_server(server_id)`

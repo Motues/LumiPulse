@@ -14,9 +14,9 @@ func (r *repo) CreateIncident(ctx context.Context, inc *model.Incident) error {
 	if inc.ParentID != nil {
 		parentID = *inc.ParentID
 	}
-	query := `INSERT INTO Incident (service_id, title, impact, status, affected_services, parent_id, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := r.db.ExecContext(ctx, query, inc.ServiceID, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, now, now)
+	query := `INSERT INTO Incident (service_id, title, impact, status, affected_services, parent_id, resolved_at, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := r.db.ExecContext(ctx, query, inc.ServiceID, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, nil, now, now)
 	if err != nil {
 		return err
 	}
@@ -24,6 +24,9 @@ func (r *repo) CreateIncident(ctx context.Context, inc *model.Incident) error {
 	inc.ID = id
 	inc.CreatedAt = now
 	inc.UpdatedAt = now
+	if inc.Status == "resolved" {
+		inc.ResolvedAt = &now
+	}
 	return nil
 }
 
@@ -43,13 +46,13 @@ func (r *repo) GetIncident(ctx context.Context, id int64) (*model.Incident, erro
 
 func (r *repo) ListIncidents(ctx context.Context, page, limit int) ([]*model.Incident, int64, error) {
 	var total int64
-	if err := r.db.GetContext(ctx, &total, "SELECT COUNT(*) FROM Incident WHERE status != 'resolved' AND parent_id IS NULL"); err != nil {
+	if err := r.db.GetContext(ctx, &total, "SELECT COUNT(*) FROM Incident WHERE parent_id IS NULL"); err != nil {
 		return nil, 0, err
 	}
 
 	offset := (page - 1) * limit
 	var incidents []*model.Incident
-	query := `SELECT * FROM Incident WHERE status != 'resolved' AND parent_id IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	query := `SELECT * FROM Incident WHERE parent_id IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?`
 	err := r.db.SelectContext(ctx, &incidents, query, limit, offset)
 	return incidents, total, err
 }
@@ -98,12 +101,28 @@ func (r *repo) UpdateIncident(ctx context.Context, inc *model.Incident) error {
 	if inc.ParentID != nil {
 		parentID = *inc.ParentID
 	}
-	query := `UPDATE Incident SET title=?, impact=?, status=?, affected_services=?, parent_id=?, updated_at=? WHERE id=?`
-	_, err := r.db.ExecContext(ctx, query, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, now, inc.ID)
+
+	// Set resolved_at when first resolved, clear when re-opened
+	var resolvedAt interface{}
+	if inc.Status == "resolved" && inc.ResolvedAt == nil {
+		resolvedAt = now
+	} else if inc.Status != "resolved" {
+		resolvedAt = nil
+	} else {
+		resolvedAt = *inc.ResolvedAt
+	}
+
+	query := `UPDATE Incident SET title=?, impact=?, status=?, affected_services=?, parent_id=?, resolved_at=?, updated_at=? WHERE id=?`
+	_, err := r.db.ExecContext(ctx, query, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, resolvedAt, now, inc.ID)
 	if err != nil {
 		return err
 	}
 	inc.UpdatedAt = now
+	if inc.Status == "resolved" && inc.ResolvedAt == nil {
+		inc.ResolvedAt = &now
+	} else if inc.Status != "resolved" {
+		inc.ResolvedAt = nil
+	}
 	return nil
 }
 
@@ -189,9 +208,9 @@ func (r *repo) DeleteIncidentUpdate(ctx context.Context, id int64) error {
 func (r *repo) ListIncidentsByServer(ctx context.Context, serverID int64) ([]*model.Incident, error) {
 	var incidents []*model.Incident
 	query := `SELECT i.* FROM Incident i
-			  INNER JOIN ProbeTask pt ON pt.service_id = i.service_id
-			  WHERE pt.server_id = ? AND i.status != 'resolved'
-			  ORDER BY i.created_at ASC`
+				  INNER JOIN ProbeTask pt ON pt.service_id = i.service_id
+				  WHERE pt.server_id = ? AND i.status != 'resolved'
+				  ORDER BY i.created_at ASC`
 	err := r.db.SelectContext(ctx, &incidents, query, serverID)
 	return incidents, err
 }
