@@ -29,9 +29,7 @@ func parseTime(s string) time.Time {
 	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
-			// If parsed time has no timezone (UTC), it was likely stored as CST before the timezone fix
 			if t.Location() == time.UTC && !strings.HasSuffix(s, "Z") && !strings.ContainsAny(s, "+-") {
-				// Treat as CST (UTC+8) and convert to UTC
 				return t.Add(-8 * time.Hour)
 			}
 			return t.UTC()
@@ -44,7 +42,8 @@ func inMaintenance(maintenances []*model.Maintenance) bool {
 	return len(maintenances) > 0
 }
 
-type serviceState struct {
+// probeTaskState 运行时探测状态（不持久化）
+type probeTaskState struct {
 	consecutiveFailures  int
 	consecutiveSuccesses int
 	autoIncidentID       int64 // 0 = no auto-incident
@@ -54,7 +53,7 @@ type HealthChecker struct {
 	repo     repository.Repository
 	interval time.Duration
 	client   *http.Client
-	states   map[int64]*serviceState
+	states   map[int64]*probeTaskState // key = serviceID
 	mu       sync.Mutex
 	stop     chan struct{}
 	wg       sync.WaitGroup
@@ -76,7 +75,7 @@ func New(repo repository.Repository, insecureSkipVerify bool) *HealthChecker {
 				return nil
 			},
 		},
-		states: make(map[int64]*serviceState),
+		states: make(map[int64]*probeTaskState),
 		stop:   make(chan struct{}),
 	}
 }
@@ -102,7 +101,6 @@ func (hc *HealthChecker) loop(ctx context.Context) {
 	ticker := time.NewTicker(hc.interval)
 	defer ticker.Stop()
 
-	// Do first check immediately
 	hc.checkAll(ctx)
 	hc.reconcileMaintenanceStatus(ctx)
 
@@ -131,6 +129,17 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		return
 	}
 
+	// Load probe tasks and build serviceID -> probeTask map
+	probeTasks, err := hc.repo.ListProbeTasks(ctx)
+	if err != nil {
+		log.Printf("[checker] list probe tasks error: %v", err)
+		return
+	}
+	taskMap := make(map[int64]*model.ProbeTask, len(probeTasks))
+	for _, t := range probeTasks {
+		taskMap[t.ServiceID] = t
+	}
+
 	today := time.Now().Format("2006-01-02")
 
 	// Build set of service IDs under active maintenance
@@ -150,6 +159,12 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 
 	for _, svc := range services {
 		if !svc.IsActive {
+			continue
+		}
+
+		// Check if service has an active probe task
+		task, hasTask := taskMap[svc.ID]
+		if !hasTask || !task.IsActive {
 			continue
 		}
 
@@ -177,7 +192,6 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		if isUp {
 			daily.UptimeCount++
 		} else if !inMaint[svc.ID] {
-			// Only count downtime when not under active maintenance
 			daily.DowntimeCount++
 		}
 		daily.TotalLatency += latency
@@ -185,18 +199,19 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 			log.Printf("[checker] update daily failed for service %d: %v", svc.ID, err)
 		}
 
-		// Auto-incident logic
-		hc.trackServiceState(ctx, svc, isUp)
+		// Auto-incident logic with probe task config
+		hc.trackProbeState(ctx, svc, task, isUp)
 	}
 }
 
-func (hc *HealthChecker) trackServiceState(ctx context.Context, svc *model.Service, isUp bool) {
+func (hc *HealthChecker) trackProbeState(ctx context.Context, svc *model.Service, task *model.ProbeTask, isUp bool) {
 	hc.mu.Lock()
 	st, exists := hc.states[svc.ID]
 	if !exists {
-		st = &serviceState{}
+		st = &probeTaskState{}
 		hc.states[svc.ID] = st
 	}
+	triggerCount := task.TriggerCount
 
 	if isUp {
 		st.consecutiveFailures = 0
@@ -212,7 +227,7 @@ func (hc *HealthChecker) trackServiceState(ctx context.Context, svc *model.Servi
 				}
 			}
 			if incID != 0 {
-				hc.resolveIncident(ctx, svc, incID)
+				hc.tryResolveIncident(ctx, svc, incID)
 			}
 		}
 	} else {
@@ -222,7 +237,7 @@ func (hc *HealthChecker) trackServiceState(ctx context.Context, svc *model.Servi
 		hasAutoIncident := st.autoIncidentID != 0
 		hc.mu.Unlock()
 
-		if failCount >= 5 && !hasAutoIncident {
+		if failCount >= triggerCount && !hasAutoIncident {
 			// Don't create incident if service is under active maintenance
 			maints, err := hc.repo.ListActiveMaintenancesByService(ctx, svc.ID)
 			if err == nil && inMaintenance(maints) {
@@ -242,16 +257,48 @@ func (hc *HealthChecker) trackServiceState(ctx context.Context, svc *model.Servi
 				return
 			}
 
-			hc.createIncident(ctx, svc, st)
+			hc.createIncident(ctx, svc, task, st)
 		}
 	}
 }
 
-func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service, incID int64) {
+// tryResolveIncident 尝试解决事件。对于合并事件，只有所有受影响服务都恢复时才解决。
+func (hc *HealthChecker) tryResolveIncident(ctx context.Context, svc *model.Service, incID int64) {
+	inc, err := hc.repo.GetIncident(ctx, incID)
+	if err != nil {
+		log.Printf("[checker] incident #%d not found for resolve: %v", incID, err)
+		return
+	}
+
+	affectedIDs := parseAffectedServices(inc.AffectedServices)
+
+	// If merged incident with multiple services, check if ALL are recovered
+	if len(affectedIDs) > 1 {
+		allRecovered := true
+		for _, svcID := range affectedIDs {
+			hc.mu.Lock()
+			st, ok := hc.states[svcID]
+			if ok && st.consecutiveSuccesses < 5 {
+				allRecovered = false
+			}
+			hc.mu.Unlock()
+			if !allRecovered {
+				break
+			}
+		}
+		if !allRecovered {
+			return // Not all services recovered yet
+		}
+	}
+
+	hc.resolveIncident(ctx, svc, inc)
+}
+
+func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service, inc *model.Incident) {
 	now := time.Now().Format(time.RFC3339)
 
 	update := &model.IncidentUpdate{
-		IncidentID: incID,
+		IncidentID: inc.ID,
 		Status:     "resolved",
 		Content:    fmt.Sprintf("%s 服务已恢复运行", svc.Name),
 	}
@@ -259,35 +306,43 @@ func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service
 		log.Printf("[checker] failed to create incident update: %v", err)
 	}
 
-	if inc, err := hc.repo.GetIncident(ctx, incID); err == nil {
-		inc.Status = "resolved"
-		inc.UpdatedAt = now
-		hc.repo.UpdateIncident(ctx, inc)
+	inc.Status = "resolved"
+	inc.UpdatedAt = now
+	hc.repo.UpdateIncident(ctx, inc)
+
+	// Restore all affected services to operational
+	affectedIDs := parseAffectedServices(inc.AffectedServices)
+	for _, svcID := range affectedIDs {
+		if s, err := hc.repo.GetService(ctx, svcID); err == nil {
+			s.Status = "operational"
+			hc.repo.UpdateService(ctx, s)
+		}
 	}
 
-	svc.Status = "operational"
-	hc.repo.UpdateService(ctx, svc)
-
+	// Reset states for all affected services
 	hc.mu.Lock()
-	if st, ok := hc.states[svc.ID]; ok {
-		st.autoIncidentID = 0
+	for _, svcID := range affectedIDs {
+		if st, ok := hc.states[svcID]; ok {
+			st.autoIncidentID = 0
+		}
 	}
 	hc.mu.Unlock()
 
-	log.Printf("[checker] resolved incident #%d for service %s", incID, svc.Name)
+	log.Printf("[checker] resolved incident #%d for service %s", inc.ID, svc.Name)
 	notifyResolved(svc.Name)
 }
 
-func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service, st *serviceState) {
+func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service, task *model.ProbeTask, st *probeTaskState) {
 	now := time.Now().Format(time.RFC3339)
 
 	inc := &model.Incident{
-		ServiceID: svc.ID,
-		Title:     fmt.Sprintf("%s 服务异常", svc.Name),
-		Impact:    "major",
-		Status:    "investigating",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ServiceID:        svc.ID,
+		Title:            fmt.Sprintf("%s 服务异常", svc.Name),
+		Impact:           "major",
+		Status:           "investigating",
+		AffectedServices: fmt.Sprintf("%d", svc.ID),
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	if err := hc.repo.CreateIncident(ctx, inc); err != nil {
 		log.Printf("[checker] failed to create incident: %v", err)
@@ -310,6 +365,74 @@ func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service,
 
 	log.Printf("[checker] auto-created incident #%d for service %s", inc.ID, svc.Name)
 	notifyAlert(svc.Name, svc.URL, now)
+
+	// Try auto-merge with same-server incidents (check server's auto_merge setting)
+	if task.ServerID != nil {
+		if srv, err := hc.repo.GetServer(ctx, *task.ServerID); err == nil && srv.AutoMerge {
+			hc.tryAutoMerge(ctx, inc, task)
+		}
+	}
+}
+
+// tryAutoMerge 检查同服务器是否有其他活跃事件，有则自动合并
+func (hc *HealthChecker) tryAutoMerge(ctx context.Context, newInc *model.Incident, task *model.ProbeTask) {
+	if task.ServerID == nil {
+		return
+	}
+
+	siblings, err := hc.repo.ListIncidentsByServer(ctx, *task.ServerID)
+	if err != nil {
+		log.Printf("[checker] list incidents by server error: %v", err)
+		return
+	}
+
+	for _, sib := range siblings {
+		if sib.ID == newInc.ID || sib.Status == "resolved" {
+			continue
+		}
+		// Merge: keep the earlier incident (sib), merge newInc into it
+		hc.mergeIncidents(ctx, sib, newInc)
+		return
+	}
+}
+
+// mergeIncidents 将 source 作为子事件合并到 target
+func (hc *HealthChecker) mergeIncidents(ctx context.Context, target, source *model.Incident) {
+	// Set source as child of target
+	source.ParentID = &target.ID
+	hc.repo.UpdateIncident(ctx, source)
+
+	// Merge affected services into target for status tracking
+	targetSvcs := parseAffectedServices(target.AffectedServices)
+	sourceSvcs := parseAffectedServices(source.AffectedServices)
+	merged := appendIfMissing(targetSvcs, sourceSvcs...)
+	target.AffectedServices = joinServiceIDs(merged)
+	hc.repo.UpdateIncident(ctx, target)
+
+	// Add merge notes
+	hc.repo.CreateIncidentUpdate(ctx, &model.IncidentUpdate{
+		IncidentID: target.ID,
+		Status:     "system",
+		Content:    fmt.Sprintf("已合并子事件 #%d（%s）", source.ID, source.Title),
+		IsInternal: true,
+	})
+	hc.repo.CreateIncidentUpdate(ctx, &model.IncidentUpdate{
+		IncidentID: source.ID,
+		Status:     "system",
+		Content:    fmt.Sprintf("已作为子事件合并到 #%d（%s）", target.ID, target.Title),
+		IsInternal: true,
+	})
+
+	// Update checker states: source services point to target incident
+	hc.mu.Lock()
+	for _, svcID := range sourceSvcs {
+		if st, ok := hc.states[svcID]; ok {
+			st.autoIncidentID = target.ID
+		}
+	}
+	hc.mu.Unlock()
+
+	log.Printf("[checker] merged incident #%d as child of #%d", source.ID, target.ID)
 }
 
 func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
@@ -411,7 +534,6 @@ func (hc *HealthChecker) checkTCP(svc *model.Service) (int, int, string) {
 }
 
 func (hc *HealthChecker) cleanup(ctx context.Context) {
-	// Clean up old daily records (90 days)
 	beforeDaily := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
 	if err := hc.repo.DeleteOldServiceDailies(ctx, beforeDaily); err != nil {
 		log.Printf("[checker] cleanup dailies failed: %v", err)
@@ -419,11 +541,48 @@ func (hc *HealthChecker) cleanup(ctx context.Context) {
 		log.Println("[checker] cleaned up daily records older than 90 days")
 	}
 
-	// Clean up old heartbeats (7 days)
 	beforeHB := time.Now().AddDate(0, 0, -7).UTC().Format("2006-01-02T15:04:05Z")
 	if err := hc.repo.DeleteOldHeartbeats(ctx, beforeHB); err != nil {
 		log.Printf("[checker] cleanup heartbeats failed: %v", err)
 	} else {
 		log.Println("[checker] cleaned up heartbeats older than 7 days")
 	}
+}
+
+// Helper functions for affected_services
+func parseAffectedServices(s string) []int64 {
+	if s == "" {
+		return nil
+	}
+	var ids []int64
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if id, err := strconv.ParseInt(p, 10, 64); err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func appendIfMissing(existing []int64, newIDs ...int64) []int64 {
+	existMap := make(map[int64]bool)
+	for _, id := range existing {
+		existMap[id] = true
+	}
+	result := make([]int64, len(existing))
+	copy(result, existing)
+	for _, id := range newIDs {
+		if !existMap[id] {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func joinServiceIDs(ids []int64) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(parts, ",")
 }

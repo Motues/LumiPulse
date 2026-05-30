@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import type { Incident } from '../api/types'
+
+const router = useRouter()
 
 const props = defineProps<{
   days: [number, number, number][]
   uptime: number
   hideLegend?: boolean
   compact?: boolean
+  serviceId?: number
+  incidentsByDate?: Map<string, Incident[]>
 }>()
 
 const GREEN = { r: 69, g: 186, b: 101 }
@@ -34,16 +40,10 @@ function getColorForDowntime(down: number): string {
   return `#${RED.r.toString(16).padStart(2, '0')}${RED.g.toString(16).padStart(2, '0')}${RED.b.toString(16).padStart(2, '0')}`
 }
 
-const statusLabel: Record<number, string> = {
-  1: '调查中',
-  2: '已确认',
-  3: '监控中',
-  4: '已解决',
-}
-
 const hoveredIndex = ref(-1)
 const tooltipX = ref(0)
 const tooltipY = ref(0)
+let hideTimer: ReturnType<typeof setTimeout> | null = null
 
 function formatDate(index: number, total: number): string {
   // Use CST (UTC+8) for date calculation
@@ -54,6 +54,7 @@ function formatDate(index: number, total: number): string {
 }
 
 function onCellEnter(e: MouseEvent, i: number) {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
   hoveredIndex.value = i
   const target = e.currentTarget as HTMLElement
   if (target) {
@@ -64,6 +65,14 @@ function onCellEnter(e: MouseEvent, i: number) {
 }
 
 function onCellLeave() {
+  hideTimer = setTimeout(() => { hoveredIndex.value = -1 }, 200)
+}
+
+function onTooltipEnter() {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+}
+
+function onTooltipLeave() {
   hoveredIndex.value = -1
 }
 
@@ -72,6 +81,13 @@ function timeText(minutes: number): string {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
   return m > 0 ? `${h}小时${m}分钟` : `${h}小时`
+}
+
+function dateKey(index: number, total: number): string {
+  const now = new Date()
+  const cst = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
+  cst.setUTCDate(cst.getUTCDate() - (total - 1 - index))
+  return `${cst.getUTCFullYear()}-${String(cst.getUTCMonth() + 1).padStart(2, '0')}-${String(cst.getUTCDate()).padStart(2, '0')}`
 }
 </script>
 
@@ -92,8 +108,10 @@ function timeText(minutes: number): string {
     <!-- Tooltip -->
     <div
       v-if="hoveredIndex >= 0"
-      class="fixed z-50 rounded-lg shadow-lg px-4 py-3 pointer-events-none"
-      :style="{ left: tooltipX + 'px', top: tooltipY + 'px', transform: 'translateX(-50%) translateY(-100%)', width: '220px', backgroundColor: 'var(--bg-color)', border: '1px solid var(--button-border-color)' }"
+      class="fixed z-50 rounded-lg shadow-lg px-4 py-3"
+      :style="{ left: tooltipX + 'px', top: tooltipY + 'px', transform: 'translateX(-50%) translateY(-100%)', width: '260px', backgroundColor: 'var(--bg-color)', border: '1px solid var(--button-border-color)' }"
+      @mouseenter="onTooltipEnter"
+      @mouseleave="onTooltipLeave"
     >
       <!-- Arrow -->
       <div class="absolute left-1/2 -bottom-[9px] -translate-x-1/2 w-0 h-0 border-l-[9px] border-r-[9px] border-t-[9px] border-transparent" :style="{ borderTopColor: 'var(--button-border-color)' }" />
@@ -119,11 +137,23 @@ function timeText(minutes: number): string {
         <template v-else>
           <div class="flex items-center gap-2 text-sm font-medium" :style="{ color: getColorForDowntime(days[hoveredIndex][1]) }">
             <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(days[hoveredIndex][1]) }" />
-            服务异常 {{ timeText(days[hoveredIndex][1]) }}
+            异常时间：{{ timeText(days[hoveredIndex][1]) }}
           </div>
-          <div class="text-xs mt-1 ml-4.5" style="color: var(--text-color); opacity: 0.4;">
-            当前状态：{{ statusLabel[days[hoveredIndex][2]] || '已解决' }}
-          </div>
+          <template v-if="incidentsByDate && serviceId">
+            <div
+              v-for="inc in (incidentsByDate.get(dateKey(hoveredIndex, days.length)) || []).filter(i => i.serviceId === serviceId || (i.affectedServices && i.affectedServices.split(',').map(Number).includes(serviceId!)))"
+              :key="inc.id"
+              class="text-xs font-bold mt-1 ml-4.5 px-2 py-1 rounded cursor-pointer transition-colors hover:bg-[var(--button-hover-color)]"
+              :class="{
+                'text-red-500 dark:text-red-400': inc.impact === 'critical',
+                'text-orange-500 dark:text-orange-400': inc.impact === 'major',
+                'text-yellow-600 dark:text-yellow-400': inc.impact === 'minor',
+              }"
+              @click.stop="router.push(`/incidents/${inc.id}`)"
+            >
+              {{ inc.title }}
+            </div>
+          </template>
         </template>
       </template>
     </div>

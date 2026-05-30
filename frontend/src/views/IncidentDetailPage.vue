@@ -1,23 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
-import type { SummaryResponse, Incident, ServiceSummary } from '../api/types'
-import ServiceMatrix from '../components/ServiceMatrix.vue'
-import PublicServiceDetail from '../components/PublicServiceDetail.vue'
+import type { Incident, ServiceSummary } from '../api/types'
 import { siteName, siteIcon, emailEnabled, showAdminButton, customFooter, subEnabledAny, subEnableEmail, subEnableRss, subEnableAtom } from '../composables/useSiteConfig'
 import { useDarkMode } from '../composables/useDarkMode'
 
+const route = useRoute()
 const router = useRouter()
-
 const { isDark, themeMode, setMode } = useDarkMode()
 
-const showThemeMenu = ref(false)
-
-const summary = ref<SummaryResponse | null>(null)
-const incidents = ref<Incident[]>([])
+const incident = ref<Incident | null>(null)
+const serviceNames = ref<string[]>([])
 const loading = ref(true)
 const error = ref('')
+
+const showThemeMenu = ref(false)
 const showSubscribeModal = ref(false)
 const subscribeTab = ref<'rss' | 'atom' | 'email'>('rss')
 const showServiceSelect = ref(false)
@@ -28,16 +26,19 @@ const subscribeMsgType = ref('success')
 const selectedServices = ref<number[]>([])
 const servicesList = ref<ServiceSummary[]>([])
 
-function openSubscribe() {
+async function openSubscribe() {
   subscribeEmail.value = ''
   subscribeMsg.value = ''
   selectedServices.value = []
   showServiceSelect.value = false
   // Pick first available tab
   subscribeTab.value = subEnableEmail.value ? 'email' : subEnableRss.value ? 'rss' : 'atom'
-  // Load services
-  if (summary.value?.services) {
-    servicesList.value = summary.value.services
+  // Load services for selection
+  try {
+    const res = await api.getPublicServices()
+    servicesList.value = res.data || []
+  } catch {
+    servicesList.value = []
   }
   showSubscribeModal.value = true
 }
@@ -76,7 +77,7 @@ function toggleService(id: number) {
 }
 
 function getFeedUrl(type: 'rss' | 'atom') {
-  return `${window.location.protocol}//${window.location.host}/feed/${type}`
+  return `${window.location.protocol}//${window.location.host}/api/v1/feed/${type}`
 }
 
 function copyFeedUrl(type: 'rss' | 'atom') {
@@ -87,17 +88,14 @@ function copyFeedUrl(type: 'rss' | 'atom') {
   })
 }
 
-
-const statusColors: Record<string, string> = {
-  operational: '#34a761',
-  degraded: '#fda305',
-  outage: '#df2d2a',
+function closeThemeMenu() {
+  showThemeMenu.value = false
 }
 
-const statusText: Record<string, string> = {
-  operational: '正常',
-  degraded: '异常',
-  outage: '故障',
+const impactText: Record<string, string> = {
+  minor: '轻微',
+  major: '重大',
+  critical: '严重',
 }
 
 const incidentStatusLabel: Record<string, string> = {
@@ -123,115 +121,35 @@ function formatDateTime(iso: string): string {
   return `${formatDate(iso)} ${formatTime(iso)}`
 }
 
-function affectedServiceNames(ids: string): string {
-  if (!ids || !summary.value) return '-'
-  return ids.split(',').map(id => {
-    const svc = summary.value!.services.find(s => s.id === Number(id))
-    return svc ? svc.name : id
-  }).join(', ')
-}
-
-function isServiceInMaintenance(serviceId: number): boolean {
-  if (!summary.value?.maintenances) return false
-  return summary.value.maintenances.some(m =>
-    m.status === 'in_progress' &&
-    m.affectedServices &&
-    m.affectedServices.split(',').map(Number).includes(serviceId)
-  )
-}
-
-function openUrl(url: string) {
-  window.open(url, '_blank')
-}
-
-const dailyStats = ref<Map<number, [number, number, number][]>>(new Map())
-const isMobile = ref(false)
-const hoveredSvcId = ref<number | null>(null)
-const selectedService = ref<ServiceSummary | null>(null)
-
-function getServiceDays(serviceId: number): [number, number, number][] {
-  return dailyStats.value.get(serviceId) || []
-}
-
-const incidentsByDate = computed(() => {
-  const map = new Map<string, Incident[]>()
-  const dayCount = isMobile.value ? 30 : 90
-  const now = new Date()
-  const cst = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
-  for (let i = dayCount - 1; i >= 0; i--) {
-    const d = new Date(cst)
-    d.setUTCDate(d.getUTCDate() - i)
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-    map.set(key, [])
-  }
-  for (const inc of incidents.value) {
-    const incDate = inc.createdAt.slice(0, 10)
-    for (const [dateStr, list] of map) {
-      if (incDate > dateStr) continue
-      if (inc.status === 'resolved') {
-        const resolvedDate = inc.updatedAt.slice(0, 10)
-        if (resolvedDate < dateStr) continue
-      }
-      list.push(inc)
-    }
-  }
-  return map
-})
-
-async function loadDailyStats() {
-  if (!summary.value) return
-  const days = isMobile.value ? 30 : 90
-  for (const svc of summary.value.services) {
-    try {
-      const res = await api.getServiceDailyStats(svc.id, days)
-      dailyStats.value.set(svc.id, res.data.days)
-    } catch {
-      dailyStats.value.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
-    }
-  }
-}
-
-let refreshTimer: ReturnType<typeof setInterval> | null = null
-
-function closeThemeMenu() {
-  showThemeMenu.value = false
-}
-
 onMounted(async () => {
   document.addEventListener('click', closeThemeMenu)
-  isMobile.value = window.innerWidth < 768
+  const id = Number(route.params.id)
+  if (!id) {
+    error.value = '无效的事件ID'
+    loading.value = false
+    return
+  }
   try {
-    const [sumRes, incRes] = await Promise.all([
+    const [incRes, sumRes] = await Promise.all([
+      api.getPublicIncident(id),
       api.getSummary(),
-      api.getPublicIncidents(1, 10),
     ])
-    summary.value = sumRes.data
-    incidents.value = incRes.data.incidents
-    await loadDailyStats()
+    incident.value = incRes.data
+
+    // Resolve affected service names
+    const allSvcs = sumRes.data.services
+    const affectedIds = incRes.data.affectedServices
+      ? incRes.data.affectedServices.split(',').map(Number).filter(Boolean)
+      : [incRes.data.serviceId]
+    serviceNames.value = affectedIds.map(id => {
+      const svc = allSvcs.find((s: ServiceSummary) => s.id === id)
+      return svc ? svc.name : `服务 #${id}`
+    })
   } catch (e: any) {
-    error.value = e.message || '加载数据失败'
+    error.value = e.message || '加载事件详情失败'
   } finally {
     loading.value = false
   }
-
-  // Auto-refresh every 30s for real-time updates
-  refreshTimer = setInterval(async () => {
-    try {
-      const [sumRes, incRes] = await Promise.all([
-        api.getSummary(),
-        api.getPublicIncidents(1, 10),
-      ])
-      summary.value = sumRes.data
-      incidents.value = incRes.data.incidents
-    } catch {
-      error.value = '数据刷新失败'
-    }
-  }, 30000)
-})
-
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
-  document.removeEventListener('click', closeThemeMenu)
 })
 </script>
 
@@ -271,9 +189,6 @@ onUnmounted(() => {
               @click="setMode('light'); showThemeMenu = false"
               class="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors rounded-md"
               :style="{ color: 'var(--text-color)', backgroundColor: themeMode === 'light' ? 'var(--button-hover-color)' : 'transparent' }"
-              onmouseover="this.style.backgroundColor='var(--button-hover-color)'"
-              onmouseout="this.style.backgroundColor=this.dataset.active === 'true' ? 'var(--button-hover-color)' : 'transparent'"
-              :data-active="themeMode === 'light'"
             >
               <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
               浅色模式
@@ -282,9 +197,6 @@ onUnmounted(() => {
               @click="setMode('dark'); showThemeMenu = false"
               class="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors rounded-md"
               :style="{ color: 'var(--text-color)', backgroundColor: themeMode === 'dark' ? 'var(--button-hover-color)' : 'transparent' }"
-              onmouseover="this.style.backgroundColor='var(--button-hover-color)'"
-              onmouseout="this.style.backgroundColor=this.dataset.active === 'true' ? 'var(--button-hover-color)' : 'transparent'"
-              :data-active="themeMode === 'dark'"
             >
               <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></svg>
               深色模式
@@ -293,9 +205,6 @@ onUnmounted(() => {
               @click="setMode('system'); showThemeMenu = false"
               class="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors rounded-md"
               :style="{ color: 'var(--text-color)', backgroundColor: themeMode === 'system' ? 'var(--button-hover-color)' : 'transparent' }"
-              onmouseover="this.style.backgroundColor='var(--button-hover-color)'"
-              onmouseout="this.style.backgroundColor=this.dataset.active === 'true' ? 'var(--button-hover-color)' : 'transparent'"
-              :data-active="themeMode === 'system'"
             >
               <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
               跟随系统
@@ -310,132 +219,88 @@ onUnmounted(() => {
     <div v-if="loading" class="text-center py-20" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
     <div v-else-if="error" class="text-center py-20 text-red-500">{{ error }}</div>
 
-    <template v-else-if="summary">
-      <!-- Hero Banner -->
-      <section :class="[
-        'rounded-lg p-8 mb-8 flex items-center justify-between relative overflow-hidden',
-        summary.overallStatus === 'operational'
-          ? 'bg-[#f0fdf4] dark:bg-[#0a2e1a]'
-          : 'bg-[#fef2f2] dark:bg-[#3a1111]'
-      ]">
-        <div class="relative z-10">
-            <h1 :class="['text-3xl font-bold mb-1', summary.overallStatus === 'operational' ? 'text-[#2d7a47] dark:text-[#4ade80]' : 'text-[#9e1f1e] dark:text-[#f87171]']">
-              {{ summary.overallStatus === 'operational' ? '所有系统运行正常' : '系统出现故障' }}
-            </h1>
-        </div>
-      </section>
+    <template v-else-if="incident">
+      <div class="flex items-center mb-6">
+        <button @click="router.push('/')" class="flex items-center gap-1.5 text-sm transition-opacity" style="color: var(--text-color); opacity: 0.5;" @mouseenter="($event.currentTarget as HTMLElement).style.opacity = '0.8'" @mouseleave="($event.currentTarget as HTMLElement).style.opacity = '0.5'">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+          返回状态页
+        </button>
+      </div>
 
-      <!-- Maintenance Plans (if any) -->
-      <section v-if="summary.maintenances && summary.maintenances.length > 0" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
-        <div>
-          <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">维护计划</h3>
-          <div v-for="m in summary.maintenances" :key="m.id" class="mb-3 last:mb-0 pb-3 last:pb-0">
-            <p class="text-sm font-medium" style="color: var(--text-color);">{{ m.title }}</p>
-            <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.5;">
-              {{ formatDateTime(m.scheduledStart) }} CST - {{ formatDateTime(m.scheduledEnd) }} CST
-            </p>
-            <p v-if="m.description" class="text-xs mt-1" style="color: var(--text-color); opacity: 0.5;">{{ m.description }}</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Service Detail (when a service is selected) -->
-      <PublicServiceDetail
-        v-if="selectedService"
-        :service="selectedService"
-        :daily-days="getServiceDays(selectedService.id)"
-        @back="selectedService = null"
-      />
-
-      <!-- Service Status -->
-      <section v-else class="rounded-lg mb-8 pb-4" style="border: 1px solid var(--button-border-color);">
-        <div class="flex items-center justify-between p-6 pb-4 mb-4">
-          <h2 class="text-lg font-bold" style="color: var(--text-color);">系统状态</h2>
-        </div>
-
-        <template v-for="(svc, idx) in summary.services" :key="svc.id">
-          <div
-            class="px-6 pb-6 rounded-lg transition-colors"
-            :class="{ 'pt-4': idx > 0 }"
-          >
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center">
-                <span class="font-bold leading-none hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors" style="color: var(--text-color);">{{ svc.name }}</span>
-                <span
-                  v-if="svc.url"
-                  class="relative inline-flex items-center ml-1"
-                  @mouseenter="hoveredSvcId = svc.id"
-                  @mouseleave="hoveredSvcId = null"
-                >
-                  <svg
-                    class="w-4 h-4 cursor-pointer transition-colors hover:text-emerald-500 dark:hover:text-emerald-400"
-                    style="color: var(--text-color); opacity: 0.4;"
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"
-                    @click.stop="openUrl(svc.url)"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-                  </svg>
-                  <div
-                    v-if="hoveredSvcId === svc.id"
-                    class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 text-xs rounded-lg whitespace-nowrap shadow-lg pointer-events-none z-10"
-                    :style="{ backgroundColor: 'var(--button-hover-color)', color: 'var(--text-color)', border: '1px solid var(--button-border-color)' }"
-                  >
-                    {{ svc.url }}
-                    <div class="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent" :style="{ borderTopColor: 'var(--button-hover-color)' }" />
-                  </div>
-                </span>
-              </div>
-              <div class="flex items-center gap-1.5 text-sm font-medium" :class="{
-                'text-[#45ba65] dark:text-[#4ade80]': svc.status === 'operational' && !isServiceInMaintenance(svc.id),
-                'text-[#f9ac05] dark:text-[#fbbf24]': svc.status === 'degraded',
-                'text-[#df2d2a] dark:text-[#f87171]': svc.status === 'outage',
-                'text-gray-400 dark:text-gray-500': isServiceInMaintenance(svc.id),
-              }">
-                <div v-if="isServiceInMaintenance(svc.id)" class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500"></div>
-                <div v-else class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[svc.status] }"></div>
-                {{ isServiceInMaintenance(svc.id) ? '维护中' : statusText[svc.status] }}
-              </div>
+      <!-- Info card -->
+      <div class="rounded-lg p-6 mb-6" style="border: 1px solid var(--button-border-color);">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-4">
+          <div>
+            <h1 class="text-2xl font-bold" :class="{
+              'text-red-500 dark:text-red-400': incident.impact === 'critical',
+              'text-orange-500 dark:text-orange-400': incident.impact === 'major',
+              'text-yellow-500 dark:text-yellow-400': incident.impact === 'minor',
+            }">{{ incident.title }}</h1>
+            <div class="flex items-center gap-3 mt-2">
+              <span class="text-sm font-medium px-2 py-0.5 rounded" :class="{
+                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400': incident.impact === 'critical',
+                'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400': incident.impact === 'major',
+                'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400': incident.impact === 'minor',
+              }">{{ impactText[incident.impact] || incident.impact }}</span>
+              <span class="text-sm font-medium px-2 py-0.5 rounded" :class="{
+                'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400': incident.status === 'investigating' || incident.status === 'identified',
+                'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400': incident.status === 'monitoring',
+                'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400': incident.status === 'resolved',
+              }">{{ incidentStatusLabel[incident.status] || incident.status }}</span>
             </div>
-            <ServiceMatrix :days="getServiceDays(svc.id)" :uptime="svc.uptime" :service-id="svc.id" :incidents-by-date="incidentsByDate" />
           </div>
-        </template>
-      </section>
-
-      <!-- Past Incidents -->
-      <section v-if="incidents.length > 0" class="mb-8">
-        <h2 class="text-lg font-bold mb-4" style="color: var(--text-color);">过去事件</h2>
-        <div v-for="inc in incidents" :key="inc.id" class="rounded-lg p-6 mb-4 cursor-pointer hover:border-emerald-500/30 dark:hover:border-emerald-400/30 transition-colors" style="border: 1px solid var(--button-border-color);" @click="router.push(`/incidents/${inc.id}`)">
-          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div class="flex items-center gap-2">
-              <h3 class="text-base font-bold" :class="{
-                'text-red-500 dark:text-red-400': inc.impact === 'critical',
-                'text-orange-500 dark:text-orange-400': inc.impact === 'major',
-                'text-yellow-500 dark:text-yellow-400': inc.impact === 'minor',
-              }">{{ inc.title }}</h3>
-              <span v-if="inc.updates && inc.updates.length > 0" class="text-xs font-medium px-2 py-0.5 rounded" :class="{
-                'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400': inc.updates[inc.updates.length - 1].status === 'investigating' || inc.updates[inc.updates.length - 1].status === 'identified',
-                'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400': inc.updates[inc.updates.length - 1].status === 'monitoring',
-                'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400': inc.updates[inc.updates.length - 1].status === 'resolved',
-              }">{{ incidentStatusLabel[inc.updates[inc.updates.length - 1].status] || inc.updates[inc.updates.length - 1].status }}</span>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+          <div>
+            <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">受影响服务</div>
+            <div class="font-medium" style="color: var(--text-color);">
+              <span v-for="(name, idx) in serviceNames" :key="idx">{{ name }}<span v-if="idx < serviceNames.length - 1">, </span></span>
             </div>
-            <div class="text-sm font-medium" style="color: var(--text-color); opacity: 0.5;">{{ formatDate(inc.createdAt) }}</div>
           </div>
-          <p v-if="inc.updates && inc.updates.length > 0" class="text-sm mt-2" style="color: var(--text-color); opacity: 0.5;">
-            {{ inc.updates[inc.updates.length - 1].content }}
-          </p>
+          <div>
+            <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">创建时间</div>
+            <div class="font-medium" style="color: var(--text-color);">{{ formatDateTime(incident.createdAt) }}</div>
+          </div>
+          <div>
+            <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">最后更新</div>
+            <div class="font-medium" style="color: var(--text-color);">{{ formatDateTime(incident.updatedAt) }}</div>
+          </div>
         </div>
-      </section>
+      </div>
 
-      <!-- No Maintenance -->
-      <section v-if="!summary.maintenances || summary.maintenances.length === 0" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
-        <div>
-          <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">维护计划</h3>
-          <p class="text-sm mb-1" style="color: var(--text-color);">暂无计划的维护</p>
-          <p class="text-sm" style="color: var(--text-color); opacity: 0.5;">我们会提前通知受影响的服务维护计划。</p>
+      <!-- Timeline -->
+      <div class="rounded-lg p-6" style="border: 1px solid var(--button-border-color);">
+        <h2 class="text-lg font-bold mb-6" style="color: var(--text-color);">事件时间线</h2>
+        <div v-if="incident.updates && incident.updates.length > 0" class="relative">
+          <ul class="space-y-4 relative z-10">
+            <li v-for="upd in [...incident.updates].reverse()" :key="upd.id" class="relative pl-4">
+              <div class="timeline-dot" :style="{ backgroundColor: upd.status === 'investigating' || upd.status === 'identified' ? '#f97316' : upd.status === 'monitoring' ? '#3b82f6' : '#22c55e', border: '2px solid var(--bg-color)' }" />
+              <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start">
+                <div class="text-sm">
+                  <span class="font-bold" style="color: var(--text-color);">{{ incidentStatusLabel[upd.status] || upd.status }}</span>
+                  <span class="ml-2" style="color: var(--text-color); opacity: 0.5;">{{ upd.content }}</span>
+                </div>
+                <div class="text-sm mt-0.5 sm:mt-0 sm:ml-4 sm:flex-shrink-0" style="color: var(--text-color); opacity: 0.4;">{{ formatTime(upd.createdAt) }} CST</div>
+              </div>
+            </li>
+          </ul>
         </div>
-      </section>
-</template>
+        <p v-else class="text-sm" style="color: var(--text-color); opacity: 0.4;">暂无更新记录</p>
+      </div>
+    </template>
   </main>
+
+  <footer style="background-color: var(--bg-color);" class="mt-4">
+    <div class="max-w-[1000px] mx-auto px-6 py-8 flex flex-col md:flex-row justify-between items-center gap-4">
+      <div class="text-sm">
+        <a href="https://github.com/Motues/LumiPulse" target="_blank" rel="noopener noreferrer" class="footer-link transition-opacity">Powered By LumiPulse</a>
+      </div>
+      <div class="flex items-center gap-6 text-sm">
+        <span v-if="customFooter" v-html="customFooter" class="footer-link"></span>
+        <a v-else-if="showAdminButton" href="/dashboard" class="footer-link transition-opacity">管理后台</a>
+      </div>
+    </div>
+  </footer>
 
   <!-- Subscribe Modal -->
   <Teleport to="body">
@@ -548,6 +413,28 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+              @click="selectedServices = (selectedServices.length === servicesList.length ? [] : servicesList.map(s => s.id))"
+              class="text-xs mb-2 transition-colors"
+              style="color: var(--text-color); opacity: 0.5;"
+            >{{ selectedServices.length === servicesList.length ? '取消全选' : '全选' }}</button>
+            <div class="max-h-40 overflow-y-auto space-y-1.5 thin-scroll p-1">
+              <label
+                v-for="svc in servicesList"
+                :key="svc.id"
+                class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-colors hover:bg-[var(--button-hover-color)]"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedServices.includes(svc.id)"
+                  @change="toggleService(svc.id)"
+                  class="rounded border-gray-300 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span style="color: var(--text-color);">{{ svc.name }}</span>
+              </label>
+            </div>
+            <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">留空则订阅所有服务</p>
+          </div>
+        </div>
 
         <p v-if="subscribeMsg" :class="['text-xs mt-3', subscribeMsgType === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500']">{{ subscribeMsg }}</p>
         <button
@@ -560,18 +447,6 @@ onUnmounted(() => {
       </div>
     </div>
   </Teleport>
-
-  <footer style="background-color: var(--bg-color);" class="mt-4">
-    <div class="max-w-[1000px] mx-auto px-6 py-8 flex flex-col md:flex-row justify-between items-center gap-4">
-      <div class="text-sm">
-        <a href="https://github.com/Motues/LumiPulse" target="_blank" rel="noopener noreferrer" class="footer-link transition-opacity">Powered By LumiPulse</a>
-      </div>
-      <div class="flex items-center gap-6 text-sm">
-        <span v-if="customFooter" v-html="customFooter" class="footer-link"></span>
-        <a v-else-if="showAdminButton" href="/dashboard" class="footer-link transition-opacity">管理后台</a>
-      </div>
-    </div>
-  </footer>
 </template>
 
 <style scoped>

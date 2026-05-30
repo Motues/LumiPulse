@@ -2,6 +2,7 @@ package http
 
 import (
 	"fmt"
+	"log"
 	"lumipluse-backend/internal/model"
 	"net/http"
 	"strconv"
@@ -49,11 +50,24 @@ func (h *Handler) CreateService(c *gin.Context) {
 		Type:        req.Type,
 		Interval:    req.Interval,
 		SortOrder:   req.SortOrder,
-	}
+		}
+		if req.ShowOnHomepage != nil {
+			svc.ShowOnHomepage = *req.ShowOnHomepage
+		}
 
-	if err := h.Repo.CreateService(c.Request.Context(), svc); err != nil {
+		if err := h.Repo.CreateService(c.Request.Context(), svc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create service"})
 		return
+	}
+
+	// Auto-create probe task for new service
+	probeTask := &model.ProbeTask{
+		ServiceID:    svc.ID,
+		TriggerCount: 5,
+		IsActive:     true,
+	}
+	if err := h.Repo.CreateProbeTask(c.Request.Context(), probeTask); err != nil {
+		log.Printf("[handler] failed to auto-create probe task for service %d: %v", svc.ID, err)
 	}
 
 	auditLog("service.create", fmt.Sprintf("name=%s url=%s", svc.Name, svc.URL))
@@ -106,6 +120,9 @@ func (h *Handler) UpdateService(c *gin.Context) {
 	}
 	if req.IsActive != nil {
 		svc.IsActive = *req.IsActive
+	}
+	if req.ShowOnHomepage != nil {
+		svc.ShowOnHomepage = *req.ShowOnHomepage
 	}
 	svc.SortOrder = req.SortOrder
 

@@ -18,6 +18,15 @@ const showDelete = ref(false)
 const deleteTarget = ref<Subscriber | null>(null)
 const deleting = ref(false)
 
+// Subscription method toggles
+const subSettings = ref({
+  sub_enable_email: 'true',
+  sub_enable_rss: 'true',
+  sub_enable_atom: 'true',
+})
+const settingsLoading = ref(true)
+const settingsSaving = ref(false)
+
 async function load() {
   loading.value = true
   try {
@@ -27,6 +36,32 @@ async function load() {
     toast(e.message || '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSettings() {
+  settingsLoading.value = true
+  try {
+    const res = await api.getSettings()
+    subSettings.value.sub_enable_email = res.data['sub_enable_email'] ?? 'true'
+    subSettings.value.sub_enable_rss = res.data['sub_enable_rss'] ?? 'true'
+    subSettings.value.sub_enable_atom = res.data['sub_enable_atom'] ?? 'true'
+  } catch (e: any) {
+    toast(e.message || '加载设置失败')
+  } finally {
+    settingsLoading.value = false
+  }
+}
+
+async function saveSubSettings() {
+  settingsSaving.value = true
+  try {
+    await api.updateSettings(subSettings.value)
+    toast('订阅方式设置已更新', 'success')
+  } catch (e: any) {
+    toast(e.message || '保存失败')
+  } finally {
+    settingsSaving.value = false
   }
 }
 
@@ -56,13 +91,76 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadSettings()
+})
 </script>
 
 <template>
   <div>
+    <!-- Subscription Method Settings -->
+    <div class="rounded-xl p-6 mb-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+      <h3 class="text-sm font-bold mb-4" style="color: var(--text-color);">订阅方式开关</h3>
+      <div v-if="settingsLoading" class="text-sm" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+      <div v-else class="space-y-4 max-w-sm">
+        <!-- Email -->
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium" style="color: var(--text-color);">邮件订阅</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-color); opacity: 0.4;">通过邮箱接收状态变更通知</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" v-model="subSettings.sub_enable_email" true-value="true" false-value="false" class="sr-only" />
+            <span class="flex items-center rounded-full transition-colors duration-200" :class="subSettings.sub_enable_email === 'true' ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'" style="width: 36px; height: 20px; flex-shrink: 0;">
+              <span class="bg-white rounded-full shadow transition-transform duration-200" :class="subSettings.sub_enable_email === 'true' ? 'translate-x-[17px]' : 'translate-x-[2px]'" style="width: 15px; height: 15px;"></span>
+            </span>
+          </label>
+        </div>
+
+        <!-- RSS -->
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium" style="color: var(--text-color);">RSS 订阅</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-color); opacity: 0.4;">通过 RSS 阅读器订阅状态更新</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" v-model="subSettings.sub_enable_rss" true-value="true" false-value="false" class="sr-only" />
+            <span class="flex items-center rounded-full transition-colors duration-200" :class="subSettings.sub_enable_rss === 'true' ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'" style="width: 36px; height: 20px; flex-shrink: 0;">
+              <span class="bg-white rounded-full shadow transition-transform duration-200" :class="subSettings.sub_enable_rss === 'true' ? 'translate-x-[17px]' : 'translate-x-[2px]'" style="width: 15px; height: 15px;"></span>
+            </span>
+          </label>
+        </div>
+
+        <!-- Atom -->
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium" style="color: var(--text-color);">Atom 订阅</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-color); opacity: 0.4;">通过 Atom 阅读器订阅状态更新</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" v-model="subSettings.sub_enable_atom" true-value="true" false-value="false" class="sr-only" />
+            <span class="flex items-center rounded-full transition-colors duration-200" :class="subSettings.sub_enable_atom === 'true' ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'" style="width: 36px; height: 20px; flex-shrink: 0;">
+              <span class="bg-white rounded-full shadow transition-transform duration-200" :class="subSettings.sub_enable_atom === 'true' ? 'translate-x-[17px]' : 'translate-x-[2px]'" style="width: 15px; height: 15px;"></span>
+            </span>
+          </label>
+        </div>
+
+        <div class="pt-2">
+          <button
+            @click="saveSubSettings"
+            :disabled="settingsSaving"
+            class="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            {{ settingsSaving ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subscriber List -->
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-bold" style="color: var(--text-color);">订阅管理</h2>
+      <h2 class="text-lg font-bold" style="color: var(--text-color);">订阅列表</h2>
     </div>
 
     <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>

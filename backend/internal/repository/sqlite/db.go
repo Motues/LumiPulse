@@ -62,17 +62,21 @@ func InitSchema(db *sqlx.DB) error {
 		title TEXT NOT NULL,
 		impact TEXT NOT NULL,
 		status TEXT DEFAULT 'investigating',
+		affected_services TEXT DEFAULT '',
+		parent_id INTEGER REFERENCES Incident(id) ON DELETE SET NULL,
 		created_at DATETIME DEFAULT (datetime('now')),
 		updated_at DATETIME DEFAULT (datetime('now'))
 	);
 	CREATE INDEX IF NOT EXISTS idx_incident_status ON Incident(status);
 	CREATE INDEX IF NOT EXISTS idx_incident_service_status ON Incident(service_id, status);
+	CREATE INDEX IF NOT EXISTS idx_incident_parent ON Incident(parent_id);
 
 	CREATE TABLE IF NOT EXISTS Incident_Update (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		incident_id INTEGER NOT NULL REFERENCES Incident(id) ON DELETE CASCADE,
 		status TEXT NOT NULL,
 		content TEXT NOT NULL,
+		is_internal INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT (datetime('now'))
 	);
 	CREATE INDEX IF NOT EXISTS idx_incident_update_incident ON Incident_Update(incident_id);
@@ -115,6 +119,28 @@ func InitSchema(db *sqlx.DB) error {
 		created_at DATETIME DEFAULT (datetime('now')),
 		updated_at DATETIME DEFAULT (datetime('now'))
 	);
+
+	CREATE TABLE IF NOT EXISTS Server (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		description TEXT DEFAULT '',
+		auto_merge INTEGER DEFAULT 1,
+		auto_merge_threshold INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT (datetime('now')),
+		updated_at DATETIME DEFAULT (datetime('now'))
+	);
+
+	CREATE TABLE IF NOT EXISTS ProbeTask (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		service_id INTEGER NOT NULL UNIQUE REFERENCES Service(id) ON DELETE CASCADE,
+		server_id INTEGER REFERENCES Server(id) ON DELETE SET NULL,
+		trigger_count INTEGER DEFAULT 5,
+		is_active INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT (datetime('now')),
+		updated_at DATETIME DEFAULT (datetime('now'))
+	);
+	CREATE INDEX IF NOT EXISTS idx_probe_service ON ProbeTask(service_id);
+	CREATE INDEX IF NOT EXISTS idx_probe_server ON ProbeTask(server_id);
 `
 
 	_, err := db.Exec(schema)
@@ -125,6 +151,13 @@ func InitSchema(db *sqlx.DB) error {
 	// Migrations for existing tables
 	migrations := []string{
 		`ALTER TABLE ServiceDaily ADD COLUMN total_latency INTEGER DEFAULT 0`,
+		`ALTER TABLE Incident ADD COLUMN affected_services TEXT DEFAULT ''`,
+		`ALTER TABLE Incident_Update ADD COLUMN is_internal INTEGER DEFAULT 0`,
+		`ALTER TABLE Server ADD COLUMN auto_merge INTEGER DEFAULT 1`,
+		`ALTER TABLE Server ADD COLUMN auto_merge_threshold INTEGER DEFAULT 1`,
+		`ALTER TABLE Incident ADD COLUMN parent_id INTEGER REFERENCES Incident(id) ON DELETE SET NULL`,
+		`ALTER TABLE Service ADD COLUMN show_on_homepage INTEGER DEFAULT 1`,
+			`ALTER TABLE Subscriber ADD COLUMN subscribed_services TEXT DEFAULT ''`,
 	}
 	for _, m := range migrations {
 		db.Exec(m) // ignore errors (column may already exist)

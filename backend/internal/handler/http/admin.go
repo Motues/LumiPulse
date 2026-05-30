@@ -167,18 +167,23 @@ func (h *Handler) GetSettings(c *gin.Context) {
 	all := utils.GetAllSettings()
 
 	allowedSettings := map[string]bool{
-		"site_name":       true,
-		"site_icon":       true,
-		"admin_email":     true,
-		"admin_name":      true,
-		"allow_origin":    true,
-		"smtp_host":       true,
-		"smtp_port":       true,
-		"smtp_user":       true,
-		"smtp_encryption": true,
-		"email_enabled":   true,
-		"notify_services": true,
-		"notify_emails":   true,
+		"site_name":                true,
+		"site_icon":                true,
+		"admin_email":              true,
+		"admin_name":               true,
+		"allow_origin":             true,
+		"smtp_host":                true,
+		"smtp_port":                true,
+		"smtp_user":                true,
+		"smtp_encryption":          true,
+		"email_enabled":            true,
+		"notify_services":          true,
+		"notify_emails":            true,
+		"show_admin_footer_button": true,
+			"sub_enable_email": true,
+			"sub_enable_rss": true,
+			"sub_enable_atom": true,
+		"custom_footer": true,
 	}
 
 	sensitiveKeys := map[string]bool{
@@ -212,19 +217,24 @@ func (h *Handler) GetSettings(c *gin.Context) {
 // UpdateSettings 更新系统设置
 func (h *Handler) UpdateSettings(c *gin.Context) {
 	allowedSettings := map[string]bool{
-		"site_name":       true,
-		"site_icon":       true,
-		"admin_email":     true,
-		"admin_name":      true,
-		"allow_origin":    true,
-		"smtp_host":       true,
-		"smtp_port":       true,
-		"smtp_user":       true,
-		"smtp_pass":       true,
-		"smtp_encryption": true,
-		"email_enabled":   true,
-		"notify_services": true,
-		"notify_emails":   true,
+		"site_name":                true,
+		"site_icon":                true,
+		"admin_email":              true,
+		"admin_name":               true,
+		"allow_origin":             true,
+		"smtp_host":                true,
+		"smtp_port":                true,
+		"smtp_user":                true,
+		"smtp_pass":                true,
+		"smtp_encryption":          true,
+		"email_enabled":            true,
+		"notify_services":          true,
+		"notify_emails":            true,
+		"show_admin_footer_button": true,
+			"sub_enable_email": true,
+			"sub_enable_rss": true,
+			"sub_enable_atom": true,
+		"custom_footer": true,
 	}
 
 	var body map[string]string
@@ -236,6 +246,20 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	for key := range body {
 		if !allowedSettings[key] {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Setting \"" + key + "\" is not allowed"})
+			return
+		}
+	}
+	// Validate: enabling email subscription requires SMTP to be configured
+	if v, ok := body["sub_enable_email"]; ok && v == "true" {
+		host := utils.GetSetting("smtp_host")
+		port := utils.GetSetting("smtp_port")
+		user := utils.GetSetting("smtp_user")
+		pass := utils.GetSetting("smtp_pass")
+		if host == "" || port == "" || user == "" || pass == "" {
+			c.JSON(http.StatusBadRequest, model.APIResponse{
+				Code:    400,
+				Message: "请先在「通知管理」中配置完整的 SMTP 信息并启用邮件通知",
+			})
 			return
 		}
 	}

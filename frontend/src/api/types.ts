@@ -8,6 +8,7 @@ export interface Service {
   status: 'operational' | 'degraded' | 'outage'
   isActive: boolean
   sortOrder: number
+  showOnHomepage: boolean
   createdAt: string
   updatedAt: string
 }
@@ -21,6 +22,7 @@ export interface ServiceSummary {
   uptime: number
   latency: number
   interval: number
+  showOnHomepage: boolean
 }
 
 export interface ServiceDetail extends Service {
@@ -51,9 +53,12 @@ export interface Incident {
   title: string
   impact: 'minor' | 'major' | 'critical'
   status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
+  affectedServices: string
+  parentId?: number
   createdAt: string
   updatedAt: string
   updates: IncidentUpdate[]
+  children?: Incident[]
 }
 
 export interface Maintenance {
@@ -139,4 +144,26 @@ export interface ApiKey {
 
 export interface ApiKeyCreated extends ApiKey {
   key: string
+}
+
+export interface Server {
+  id: number
+  name: string
+  description: string
+  autoMerge: boolean
+  autoMergeThreshold: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProbeTask {
+  id: number
+  serviceId: number
+  serverId?: number
+  triggerCount: number
+  isActive: boolean
+  serviceName: string
+  serverName: string
+  createdAt: string
+  updatedAt: string
 }

@@ -8,10 +8,10 @@ import (
 
 func (r *repo) CreateService(ctx context.Context, s *model.Service) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, created_at, updated_at)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, created_at, updated_at)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	res, err := r.db.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
-		"operational", true, s.SortOrder, now, now)
+		"operational", true, s.SortOrder, s.ShowOnHomepage, now, now)
 	if err != nil {
 		return err
 	}
@@ -26,7 +26,7 @@ func (r *repo) CreateService(ctx context.Context, s *model.Service) error {
 
 func (r *repo) ListServices(ctx context.Context) ([]*model.Service, error) {
 	var services []*model.Service
-	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, created_at, updated_at
+	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, created_at, updated_at
 			  FROM Service ORDER BY sort_order ASC, id ASC`
 	err := r.db.SelectContext(ctx, &services, query)
 	return services, err
@@ -34,7 +34,7 @@ func (r *repo) ListServices(ctx context.Context) ([]*model.Service, error) {
 
 func (r *repo) GetService(ctx context.Context, id int64) (*model.Service, error) {
 	var s model.Service
-	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, created_at, updated_at
+	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, created_at, updated_at
 			  FROM Service WHERE id = ?`
 	err := r.db.GetContext(ctx, &s, query, id)
 	return &s, err
@@ -42,10 +42,10 @@ func (r *repo) GetService(ctx context.Context, id int64) (*model.Service, error)
 
 func (r *repo) UpdateService(ctx context.Context, s *model.Service) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	query := `UPDATE Service SET name=?, description=?, url=?, type=?, interval=?, status=?, is_active=?, sort_order=?, updated_at=?
+	query := `UPDATE Service SET name=?, description=?, url=?, type=?, interval=?, status=?, is_active=?, sort_order=?, show_on_homepage=?, updated_at=?
 			  WHERE id=?`
 	_, err := r.db.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
-		s.Status, s.IsActive, s.SortOrder, now, s.ID)
+		s.Status, s.IsActive, s.SortOrder, s.ShowOnHomepage, now, s.ID)
 	if err != nil {
 		return err
 	}

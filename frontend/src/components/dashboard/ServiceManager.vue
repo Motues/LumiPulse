@@ -21,7 +21,7 @@ const services = ref<ServiceDetail[]>([])
 const loading = ref(true)
 const showForm = ref(false)
 const editing = ref<ServiceDetail | null>(null)
-const form = ref({ name: '', url: '', description: '', type: 'http', interval: 60 })
+const form = ref({ name: '', url: '', description: '', type: 'http', interval: 60, showOnHomepage: true })
 const dragIndex = ref<number | null>(null)
 const searchQuery = ref('')
 
@@ -70,7 +70,7 @@ const { markClean: cleanSvc, handleClose: closeSvc, restoreFromStorage: restoreS
 
 function openCreate() {
   editing.value = null
-  const defaults = { name: '', url: '', description: '', type: 'http', interval: 60 }
+  const defaults = { name: '', url: '', description: '', type: 'http', interval: 60, showOnHomepage: true }
   form.value = { ...defaults }
   restoreSvc()
   cleanSvc()
@@ -85,6 +85,7 @@ function openEdit(svc: ServiceDetail) {
     description: svc.description || '',
     type: svc.type,
     interval: svc.interval,
+    showOnHomepage: svc.showOnHomepage,
   }
   cleanSvc()
   showForm.value = true
@@ -298,6 +299,23 @@ watch(() => props.pendingServiceId, (id) => {
               <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">间隔 (秒)</label>
               <input v-model.number="form.interval" type="number" class="input-field w-full px-3 py-2 rounded-lg text-sm" />
             </div>
+          </div>
+          <div class="flex items-center justify-between pt-2">
+            <span class="text-sm font-medium" style="color: var(--text-color);">在首页展示</span>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" v-model="form.showOnHomepage" class="sr-only" />
+              <span
+                class="flex items-center rounded-full transition-colors duration-200"
+                :class="form.showOnHomepage ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'"
+                style="width: 40px; height: 22px; flex-shrink: 0;"
+              >
+                <span
+                  class="bg-white rounded-full shadow transition-transform duration-200"
+                  :class="form.showOnHomepage ? 'translate-x-[19px]' : 'translate-x-[3px]'"
+                  style="width: 16px; height: 16px;"
+                ></span>
+              </span>
+            </label>
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">

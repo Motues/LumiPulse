@@ -49,15 +49,19 @@ export const api = {
     request<ApiResponse<{ start: string; interval: number; latencies: number[]; statuses: number[] }>>('GET', `/services/${id}/latency?days=${days}`),
   getPublicIncidents: (page = 1, limit = 20) =>
     request<ApiResponse<{ incidents: import('./types').Incident[]; pagination: import('./types').Pagination }>>('GET', `/incidents?page=${page}&limit=${limit}`),
+  getPublicIncident: (id: number) =>
+    request<ApiResponse<import('./types').Incident>>('GET', `/incidents/${id}`),
   getMaintenances: () => request<ApiResponse<import('./types').Maintenance[]>>('GET', '/maintenances'),
   getServiceDailyStats: (id: number, days = 90) =>
     request<ApiResponse<import('./types').ServiceDailyStats>>('GET', `/services/${id}/daily-stats?days=${days}`),
   getSiteConfig: () =>
     request<ApiResponse<Record<string, string>>>('GET', '/site-config'),
+  getPublicServices: () =>
+    request<ApiResponse<import('./types').ServiceSummary[]>>('GET', '/services'),
 
   // Public subscription
-  subscribe: (email: string) =>
-    request<ApiResponse<void>>('POST', '/subscribe', { email }),
+  subscribe: (email: string, services?: number[]) =>
+    request<ApiResponse<void>>('POST', '/subscribe', services ? { email, services } : { email }),
 
   // Auth
   login: (username: string, password: string) =>
@@ -135,6 +139,36 @@ export const api = {
     request<ApiResponse<import('./types').Maintenance>>('PUT', `/admin/maintenances/${id}`, data, true),
   deleteMaintenance: (id: number) =>
     request<ApiResponse<void>>('DELETE', `/admin/maintenances/${id}`, undefined, true),
+
+  // Admin - Servers
+  getServers: () =>
+    request<ApiResponse<import('./types').Server[]>>('GET', '/admin/servers', undefined, true),
+  createServer: (data: any) =>
+    request<ApiResponse<import('./types').Server>>('POST', '/admin/servers', data, true),
+  updateServer: (id: number, data: any) =>
+    request<ApiResponse<import('./types').Server>>('PUT', `/admin/servers/${id}`, data, true),
+  deleteServer: (id: number) =>
+    request<ApiResponse<void>>('DELETE', `/admin/servers/${id}`, undefined, true),
+
+  // Admin - Probe Tasks
+  getProbeTasks: () =>
+    request<ApiResponse<import('./types').ProbeTask[]>>('GET', '/admin/probe-tasks', undefined, true),
+  createProbeTask: (data: any) =>
+    request<ApiResponse<import('./types').ProbeTask>>('POST', '/admin/probe-tasks', data, true),
+  updateProbeTask: (id: number, data: any) =>
+    request<ApiResponse<import('./types').ProbeTask>>('PUT', `/admin/probe-tasks/${id}`, data, true),
+  deleteProbeTask: (id: number) =>
+    request<ApiResponse<void>>('DELETE', `/admin/probe-tasks/${id}`, undefined, true),
+
+  // Admin - Incident detail (with children and all updates)
+  getAdminIncident: (id: number) =>
+    request<ApiResponse<import('./types').Incident>>('GET', `/admin/incidents/${id}`, undefined, true),
+
+  // Admin - Incident merge/split
+  mergeIncident: (id: number, sourceId: number) =>
+    request<ApiResponse<void>>('POST', `/admin/incidents/${id}/merge`, { sourceId }, true),
+  splitIncident: (id: number) =>
+    request<ApiResponse<void>>('POST', `/admin/incidents/${id}/split`, undefined, true),
 
   // Generic request for custom endpoints
   request: <T = any>(method: string, path: string, body?: any, auth = false): Promise<T> =>

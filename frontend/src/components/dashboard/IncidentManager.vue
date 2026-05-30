@@ -16,24 +16,108 @@ const { show: toast } = useToast()
 
 // Detail view
 const selectedIncident = ref<Incident | null>(null)
+const loadingDetail = ref(false)
+
+// Merge / Split
+const showMerge = ref(false)
+const mergeTarget = ref<Incident | null>(null)
+const mergeSourceId = ref('')
+
+const mergeableIncidents = computed(() => {
+  if (!mergeTarget.value) return []
+  return incidents.value.filter(i => i.id !== mergeTarget.value!.id && i.status !== 'resolved')
+})
+
+const mergeOptions = computed(() => {
+  return mergeableIncidents.value.map(inc => ({
+    label: inc.title,
+    value: String(inc.id),
+  }))
+})
+
+function isMerged(inc: Incident): boolean {
+  const ids = inc.affectedServices ? inc.affectedServices.split(',').filter(Boolean).map(Number) : []
+  return ids.length > 1
+}
+
+function openMerge(inc: Incident) {
+  if (inc.status === 'resolved') {
+    toast('已解决的事件不能合并')
+    return
+  }
+  mergeTarget.value = inc
+  mergeSourceId.value = ''
+  showMerge.value = true
+}
+
+async function saveMerge() {
+  if (!mergeTarget.value || !mergeSourceId.value) return
+  try {
+    await api.mergeIncident(mergeTarget.value.id, Number(mergeSourceId.value))
+    showMerge.value = false
+    toast('合并成功', 'success')
+    load()
+  } catch (e: any) {
+    toast(e.message || '合并失败')
+  }
+}
+
+async function openDetail(inc: Incident) {
+  loadingDetail.value = true
+  try {
+    const res = await api.getAdminIncident(inc.id)
+    selectedIncident.value = res.data
+  } catch (e: any) {
+    // Fallback: use list item if detail fetch fails
+    selectedIncident.value = inc
+    toast(e.message || '加载事件详情失败')
+  } finally {
+    loadingDetail.value = false
+  }
+}
 
 function getServiceName(serviceId: number): string {
   const svc = services.value.find(s => s.id === serviceId)
   return svc ? svc.name : ''
 }
 
-function handleDetailUpdated() {
-  load().then(() => {
-    if (selectedIncident.value) {
-      const updated = incidents.value.find(i => i.id === selectedIncident.value!.id)
-      if (updated) selectedIncident.value = updated
+async function handleDetailUpdated() {
+  if (selectedIncident.value) {
+    try {
+      const res = await api.getAdminIncident(selectedIncident.value.id)
+      selectedIncident.value = res.data
+    } catch {
+      await load()
+      if (selectedIncident.value) {
+        const updated = incidents.value.find(i => i.id === selectedIncident.value!.id)
+        if (updated) selectedIncident.value = updated
+      }
     }
-  })
+  } else {
+    await load()
+  }
 }
 
 function handleDetailDeleted() {
   selectedIncident.value = null
   load()
+}
+
+async function handleSplit(id: number) {
+  try {
+    await api.splitIncident(id)
+    toast('拆分成功', 'success')
+    // If viewing a parent incident, re-fetch detail to update children list
+    if (selectedIncident.value && selectedIncident.value.id !== id) {
+      const res = await api.getAdminIncident(selectedIncident.value.id)
+      selectedIncident.value = res.data
+    } else {
+      selectedIncident.value = null
+      await load()
+    }
+  } catch (e: any) {
+    toast(e.message || '拆分失败')
+  }
 }
 
 // Incident CRUD
@@ -199,13 +283,17 @@ onMounted(() => {
 <template>
   <div>
     <!-- Detail view -->
+    <div v-if="loadingDetail" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
     <IncidentDetail
-      v-if="selectedIncident"
+      v-else-if="selectedIncident"
       :incident="selectedIncident"
       :service-name="getServiceName(selectedIncident.serviceId)"
+      :services="services"
       @back="selectedIncident = null"
       @updated="handleDetailUpdated"
       @deleted="handleDetailDeleted"
+      @merge="openMerge"
+      @split="handleSplit"
     />
 
     <!-- List view -->
@@ -233,7 +321,7 @@ onMounted(() => {
           </tr>
         </thead>
         <tbody class="divide-y">
-          <tr v-for="inc in incidents" :key="inc.id" @click="selectedIncident = inc" class="cursor-pointer hover:bg-[var(--button-hover-color)]">
+          <tr v-for="inc in incidents" :key="inc.id" @click="openDetail(inc)" class="cursor-pointer hover:bg-[var(--button-hover-color)]">
             <td class="px-6 py-4 font-bold" style="color: var(--text-color);">{{ inc.title }}</td>
             <td class="px-6 py-4">
               <span :class="['inline-flex items-center px-2 py-1 rounded text-xs font-medium border', impactClass(inc.impact)]">
@@ -362,6 +450,29 @@ onMounted(() => {
         <div class="flex justify-end gap-3 mt-6">
           <button @click="handleCloseUpdate" class="btn-cancel px-4 py-2 text-sm rounded-lg">取消</button>
           <button @click="saveUpdate" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Merge Modal -->
+    <div v-if="showMerge && mergeTarget" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showMerge = false">
+      <div class="rounded-xl p-4 md:p-6 w-full max-w-lg mx-4" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">合并事件</h3>
+        <div class="text-sm mb-4" style="color: var(--text-color); opacity: 0.5;">
+          选择要合并至「{{ mergeTarget.title }}」的事件
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">选择事件 *</label>
+            <CustomSelect v-model="mergeSourceId" :options="mergeOptions" placeholder="请选择..." />
+            <div v-if="mergeableIncidents.length === 0" class="text-sm mt-2" style="color: var(--text-color); opacity: 0.4;">
+              没有可合并的事件
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end gap-3 mt-6">
+          <button @click="showMerge = false" class="btn-cancel px-4 py-2 text-sm rounded-lg">取消</button>
+          <button @click="saveMerge" :disabled="!mergeSourceId || mergeableIncidents.length === 0" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-40">合并</button>
         </div>
       </div>
     </div>

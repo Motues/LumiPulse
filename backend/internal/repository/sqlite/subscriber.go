@@ -6,16 +6,17 @@ import (
 	"time"
 )
 
-func (r *repo) CreateSubscriber(ctx context.Context, email string) (*model.Subscriber, error) {
+func (r *repo) CreateSubscriber(ctx context.Context, email string, services string) (*model.Subscriber, error) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	query := `INSERT INTO Subscriber (email, verified, created_at, updated_at) VALUES (?, 0, ?, ?)`
-	res, err := r.db.ExecContext(ctx, query, email, now, now)
+	query := `INSERT INTO Subscriber (email, verified, subscribed_services, created_at, updated_at) VALUES (?, 0, ?, ?, ?)`
+	res, err := r.db.ExecContext(ctx, query, email, now, services, now)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return &model.Subscriber{
-		ID:        id,
+		ID:                id,
+			SubscribedServices: services,
 		Email:     email,
 		Verified:  false,
 		CreatedAt: now,
@@ -38,4 +39,10 @@ func (r *repo) GetSubscriberByEmail(ctx context.Context, email string) (*model.S
 	var s model.Subscriber
 	err := r.db.GetContext(ctx, &s, "SELECT * FROM Subscriber WHERE email = ?", email)
 	return &s, err
+}
+
+func (r *repo) UpdateSubscriberServices(ctx context.Context, email string, services string) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := r.db.ExecContext(ctx, "UPDATE Subscriber SET subscribed_services=?, updated_at=? WHERE email=?", services, now, email)
+	return err
 }

@@ -5,6 +5,7 @@ import (
 	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +29,7 @@ func incidentSeverity(status string) int {
 func reconcileStatus(incidents []*model.Incident, svcID int64) string {
 	maxSev := 0
 	for _, inc := range incidents {
-		if inc.ServiceID != svcID {
+		if inc.ServiceID != svcID && !isIncidentAffectsService(inc, svcID) {
 			continue
 		}
 		if sev := incidentSeverity(inc.Status); sev > maxSev {
@@ -44,6 +45,19 @@ func reconcileStatus(incidents []*model.Incident, svcID int64) string {
 	default:
 		return "operational"
 	}
+}
+
+// isIncidentAffectsService checks if an incident affects a service via affected_services (merged incidents).
+func isIncidentAffectsService(inc *model.Incident, svcID int64) bool {
+	if inc.AffectedServices == "" {
+		return false
+	}
+	for _, id := range parseAffectedServices(inc.AffectedServices) {
+		if id == svcID {
+			return true
+		}
+	}
+	return false
 }
 
 // batchCalcUptime computes uptime for all given service IDs in a single query.
@@ -103,21 +117,33 @@ func (h *Handler) Subscribe(c *gin.Context) {
 		return
 	}
 
+	// Convert services to comma-separated string
+	servicesStr := ""
+	if len(req.Services) > 0 {
+		svcStrs := make([]string, len(req.Services))
+		for i, sid := range req.Services {
+			svcStrs[i] = strconv.FormatInt(sid, 10)
+		}
+		servicesStr = strings.Join(svcStrs, ",")
+	}
+
 	// Check if already subscribed
 	if existing, err := h.Repo.GetSubscriberByEmail(c.Request.Context(), req.Email); err == nil && existing != nil {
+		// Update services if already subscribed
+		if existing.SubscribedServices != servicesStr {
+			_ = h.Repo.UpdateSubscriberServices(c.Request.Context(), req.Email, servicesStr)
+		}
 		c.JSON(http.StatusOK, model.APIResponse{Code: 200, Message: "该邮箱已订阅"})
 		return
 	}
 
-	if _, err := h.Repo.CreateSubscriber(c.Request.Context(), req.Email); err != nil {
+	if _, err := h.Repo.CreateSubscriber(c.Request.Context(), req.Email, servicesStr); err != nil {
 		c.JSON(http.StatusInternalServerError, model.APIResponse{Code: 500, Message: "订阅失败，请稍后重试"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, model.APIResponse{Code: 201, Message: "订阅成功"})
 }
-
-// GetSummary 获取系统整体健康状况及当前活跃故障
 func (h *Handler) GetSummary(c *gin.Context) {
 	if cached := h.getCached(); cached != nil {
 		c.JSON(http.StatusOK, model.APIResponse{
@@ -131,6 +157,15 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch services"})
 		return
 	}
+
+	// Filter to only homepage-visible services
+	visibleSvcs := make([]*model.Service, 0, len(services))
+	for _, svc := range services {
+		if svc.ShowOnHomepage {
+			visibleSvcs = append(visibleSvcs, svc)
+		}
+	}
+	services = visibleSvcs
 
 	activeIncidents, err := h.Repo.ListActiveIncidents(c.Request.Context())
 	if err != nil {
@@ -151,7 +186,14 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		updatesMap, err := h.Repo.BatchListIncidentUpdates(c.Request.Context(), incIDs)
 		if err == nil {
 			for _, inc := range activeIncidents {
-				inc.Updates = updatesMap[inc.ID]
+				updates := updatesMap[inc.ID]
+				filtered := make([]*model.IncidentUpdate, 0, len(updates))
+				for _, u := range updates {
+					if !u.IsInternal {
+						filtered = append(filtered, u)
+					}
+				}
+				inc.Updates = filtered
 			}
 		}
 	}
@@ -217,6 +259,15 @@ func (h *Handler) ListServices(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch services"})
 		return
 	}
+
+	// Filter to only homepage-visible services
+	visibleSvcs := make([]*model.Service, 0, len(services))
+	for _, svc := range services {
+		if svc.ShowOnHomepage {
+			visibleSvcs = append(visibleSvcs, svc)
+		}
+	}
+	services = visibleSvcs
 
 	activeIncidents, err := h.Repo.ListActiveIncidents(c.Request.Context())
 	if err != nil {
@@ -378,6 +429,40 @@ func (h *Handler) GetServiceLatency(c *gin.Context) {
 	})
 }
 
+// GetPublicIncident 获取单个故障事件详情（含更新时间线）
+func (h *Handler) GetPublicIncident(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, model.APIResponse{Code: 400, Message: "Invalid incident id"})
+		return
+	}
+
+	inc, err := h.Repo.GetIncident(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, model.APIResponse{Code: 404, Message: "Incident not found"})
+		return
+	}
+
+	updates, err := h.Repo.ListIncidentUpdates(c.Request.Context(), id)
+	if err != nil {
+		updates = []*model.IncidentUpdate{}
+	}
+	filtered := make([]*model.IncidentUpdate, 0, len(updates))
+	for _, u := range updates {
+		if !u.IsInternal {
+			filtered = append(filtered, u)
+		}
+	}
+	inc.Updates = filtered
+
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "ok",
+		Data:    inc,
+	})
+}
+
 // ListIncidents 获取最近的故障事件列表（分页）
 func (h *Handler) ListIncidents(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -404,7 +489,14 @@ func (h *Handler) ListIncidents(c *gin.Context) {
 		updatesMap, err := h.Repo.BatchListIncidentUpdates(c.Request.Context(), incIDs)
 		if err == nil {
 			for _, inc := range incidents {
-				inc.Updates = updatesMap[inc.ID]
+				updates := updatesMap[inc.ID]
+				filtered := make([]*model.IncidentUpdate, 0, len(updates))
+				for _, u := range updates {
+					if !u.IsInternal {
+						filtered = append(filtered, u)
+					}
+				}
+				inc.Updates = filtered
 			}
 		}
 	}
@@ -459,6 +551,11 @@ func (h *Handler) GetSiteConfig(c *gin.Context) {
 			"site_name":     utils.GetSetting("site_name"),
 			"site_icon":     utils.GetSetting("site_icon"),
 			"email_enabled": emailEnabled,
+			"show_admin_footer_button": utils.GetSetting("show_admin_footer_button"),
+			"custom_footer": utils.GetSetting("custom_footer"),
+			"sub_enable_email": utils.GetSetting("sub_enable_email"),
+			"sub_enable_rss": utils.GetSetting("sub_enable_rss"),
+			"sub_enable_atom": utils.GetSetting("sub_enable_atom"),
 		},
 	})
 }

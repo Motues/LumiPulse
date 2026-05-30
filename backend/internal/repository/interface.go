@@ -65,8 +65,32 @@ type Repository interface {
 	DeleteApiKey(ctx context.Context, id int64) error
 
 	// Subscriber
-	CreateSubscriber(ctx context.Context, email string) (*model.Subscriber, error)
+	CreateSubscriber(ctx context.Context, email string, services string) (*model.Subscriber, error)
 	ListSubscribers(ctx context.Context) ([]*model.Subscriber, error)
 	DeleteSubscriber(ctx context.Context, id int64) error
 	GetSubscriberByEmail(ctx context.Context, email string) (*model.Subscriber, error)
+	UpdateSubscriberServices(ctx context.Context, email string, services string) error
+
+	// Server
+	CreateServer(ctx context.Context, s *model.Server) error
+	ListServers(ctx context.Context) ([]*model.Server, error)
+	GetServer(ctx context.Context, id int64) (*model.Server, error)
+	UpdateServer(ctx context.Context, s *model.Server) error
+	DeleteServer(ctx context.Context, id int64) error
+
+	// ProbeTask
+	CreateProbeTask(ctx context.Context, t *model.ProbeTask) error
+	ListProbeTasks(ctx context.Context) ([]*model.ProbeTask, error)
+	GetProbeTask(ctx context.Context, id int64) (*model.ProbeTask, error)
+	GetProbeTaskByService(ctx context.Context, serviceID int64) (*model.ProbeTask, error)
+	UpdateProbeTask(ctx context.Context, t *model.ProbeTask) error
+	DeleteProbeTask(ctx context.Context, id int64) error
+	ListProbeTasksByServer(ctx context.Context, serverID int64) ([]*model.ProbeTask, error)
+
+	// Incident - extended
+	ListIncidentsByServer(ctx context.Context, serverID int64) ([]*model.Incident, error)
+	ListChildIncidents(ctx context.Context, parentID int64) ([]*model.Incident, error)
+	UpdateChildrenStatus(ctx context.Context, parentID int64, status string) error
+		// Data export/import
+		ImportFullData(ctx context.Context, data *model.ImportData) error
 }

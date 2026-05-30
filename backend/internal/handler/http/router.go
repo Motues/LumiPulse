@@ -15,10 +15,15 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 		v1.GET("/services/:id/latency", h.GetServiceLatency)
 		v1.GET("/services/:id/daily-stats", h.GetDailyStats)
 		v1.GET("/incidents", h.ListIncidents)
+		v1.GET("/incidents/:id", h.GetPublicIncident)
 		v1.GET("/maintenances", h.ListMaintenances)
 		v1.GET("/site-config", h.GetSiteConfig)
-			v1.POST("/subscribe", h.Subscribe)
+		v1.POST("/subscribe", h.Subscribe)
 	}
+
+	// Feed routes at root level
+	r.GET("/feed/rss", h.GetRSSFeed)
+	r.GET("/feed/atom", h.GetAtomFeed)
 
 	// Admin API
 	admin := r.Group("/api/v1/admin")
@@ -55,12 +60,27 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 
 			// Incidents
 			auth.GET("/incidents", h.AdminListIncidents)
+			auth.GET("/incidents/:id", h.GetAdminIncident)
 			auth.POST("/incidents", h.CreateIncident)
 			auth.POST("/incidents/:id/updates", h.CreateIncidentUpdate)
 			auth.PUT("/incidents/:id/updates/:updateId", h.UpdateIncidentUpdate)
 			auth.DELETE("/incidents/:id/updates/:updateId", h.DeleteIncidentUpdate)
 			auth.PATCH("/incidents/:id", h.UpdateIncident)
 			auth.DELETE("/incidents/:id", h.DeleteIncident)
+			auth.POST("/incidents/:id/merge", h.MergeIncident)
+			auth.POST("/incidents/:id/split", h.SplitIncident)
+
+			// Servers
+			auth.GET("/servers", h.ListServers)
+			auth.POST("/servers", h.CreateServer)
+			auth.PUT("/servers/:id", h.UpdateServer)
+			auth.DELETE("/servers/:id", h.DeleteServer)
+
+			// Probe Tasks
+			auth.GET("/probe-tasks", h.ListProbeTasks)
+			auth.POST("/probe-tasks", h.CreateProbeTask)
+			auth.PUT("/probe-tasks/:id", h.UpdateProbeTask)
+			auth.DELETE("/probe-tasks/:id", h.DeleteProbeTask)
 
 			// Maintenances
 			auth.GET("/maintenances", h.AdminListMaintenances)
@@ -74,9 +94,12 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 			auth.PUT("/api-keys/:id", h.UpdateApiKey)
 			auth.DELETE("/api-keys/:id", h.DeleteApiKey)
 
-				// Subscribers
-				auth.GET("/subscribers", h.AdminListSubscribers)
-				auth.DELETE("/subscribers/:id", h.AdminDeleteSubscriber)
+			// Subscribers
+			auth.GET("/subscribers", h.AdminListSubscribers)
+			auth.DELETE("/subscribers/:id", h.AdminDeleteSubscriber)
+				// Data export/import
+				auth.GET("/export", h.AdminExport)
+				auth.POST("/import", h.AdminImport)
 		}
 	}
 }

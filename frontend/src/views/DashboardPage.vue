@@ -13,6 +13,7 @@ import UserManager from '../components/dashboard/UserManager.vue'
 import NotificationManager from '../components/dashboard/NotificationManager.vue'
 import ApiKeyManager from '../components/dashboard/ApiKeyManager.vue'
 import SubscriberManager from '../components/dashboard/SubscriberManager.vue'
+import ProbeManager from '../components/dashboard/ProbeManager.vue'
 
 type Section = 'dashboard' | 'services' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'users' | 'subscribers' | 'notifications' | 'settings' | 'api-keys'
 const activeSection = ref<Section>('dashboard')
@@ -123,14 +124,7 @@ function switchSection(s: string, serviceId?: number) {
         <MaintenanceManager v-else-if="activeSection === 'maintenances'" />
         <SettingsPanel v-else-if="activeSection === 'settings'" />
 
-        <!-- Placeholder sections -->
-        <div v-else-if="activeSection === 'probes'" class="flex flex-col items-center justify-center py-20" style="color: var(--text-color); opacity: 0.4;">
-          <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z M12 6a6 6 0 016 6 6 6 0 01-6 6 6 6 0 01-6-6 6 6 0 016-6z" />
-          </svg>
-          <p class="text-base font-medium" style="opacity: 1;">探测任务</p>
-          <p class="text-sm mt-1" style="opacity: 1;">功能开发中，敬请期待</p>
-        </div>
+        <ProbeManager v-else-if="activeSection === 'probes'" />
 
         <LogViewer v-else-if="activeSection === 'logs'" />
 

@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { api } from '../../api/client'
-import type { Incident, IncidentUpdate } from '../../api/types'
+import type { Incident, IncidentUpdate, Service } from '../../api/types'
 import { useToast } from '../../composables/useToast'
 import CustomSelect from './CustomSelect.vue'
 
 const props = defineProps<{
   incident: Incident
   serviceName: string
+  services: Service[]
 }>()
 
 const emit = defineEmits<{
   back: []
   updated: []
   deleted: []
+  merge: [incident: Incident]
+  split: [id: number]
 }>()
 
 const { show: toast } = useToast()
@@ -59,6 +62,16 @@ const dotClass = (s: string) => {
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN')
 }
+
+const affectedServiceNames = computed(() => {
+  if (!props.incident.affectedServices) return [props.serviceName].filter(Boolean)
+  const ids = props.incident.affectedServices.split(',').map(Number).filter(Boolean)
+  if (ids.length === 0) return [props.serviceName].filter(Boolean)
+  return ids.map(id => {
+    const svc = props.services.find(s => s.id === id)
+    return svc ? svc.name : '未知'
+  })
+})
 
 // Edit mode
 const showEdit = ref(false)
@@ -166,6 +179,9 @@ const reversedUpdates = computed(() => {
         <button @click="openEdit" class="op-btn op-btn-edit p-1.5 rounded-lg" title="编辑">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
+        <button @click="emit('merge', incident)" v-if="incident.status !== 'resolved'" class="op-btn p-1.5 rounded-lg" title="合并">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-3-3m3 3l3-3M4 20h16" /></svg>
+        </button>
         <button @click="handleDelete" class="op-btn op-btn-delete p-1.5 rounded-lg" title="删除">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
@@ -190,7 +206,12 @@ const reversedUpdates = computed(() => {
         </div>
         <div>
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">关联服务</div>
-          <div class="font-medium" style="color: var(--text-color);">{{ serviceName || '-' }}</div>
+          <div class="font-medium" style="color: var(--text-color);">
+            <template v-if="affectedServiceNames.length > 0">
+              <span v-for="(name, idx) in affectedServiceNames" :key="idx">{{ name }}<span v-if="idx < affectedServiceNames.length - 1">, </span></span>
+            </template>
+            <template v-else>-</template>
+          </div>
         </div>
         <div>
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">创建时间</div>
@@ -199,6 +220,39 @@ const reversedUpdates = computed(() => {
         <div>
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">最后更新</div>
           <div style="color: var(--text-color); opacity: 0.7;">{{ formatTime(incident.updatedAt) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Children (sub-events) -->
+    <div v-if="incident.children && incident.children.length > 0" class="rounded-xl p-5 mb-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-bold" style="color: var(--text-color);">子事件（{{ incident.children.length }}）</h3>
+      </div>
+      <div class="space-y-2">
+        <div
+          v-for="child in incident.children"
+          :key="child.id"
+          class="group flex items-center justify-between px-4 py-2.5 rounded-lg transition-colors hover:bg-[var(--button-hover-color)]"
+        >
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium" style="color: var(--text-color);">{{ child.title }}</span>
+            <span :class="['inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border', impactClass(child.impact)]">
+              {{ child.impact === 'critical' ? '严重' : child.impact === 'major' ? '较大' : '轻微' }}
+            </span>
+            <span class="text-xs px-2 py-0.5 rounded" :class="statusClass(child.status)">
+              {{ statusLabel[child.status] || child.status }}
+            </span>
+          </div>
+          <button
+            @click="emit('split', child.id)"
+            class="op-btn p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+            title="拆分出去"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 20V8m0 0l3 3m-3-3L9 11M4 4h16" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>
