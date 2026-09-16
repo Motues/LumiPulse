@@ -142,14 +142,14 @@ function dateKey(index: number, total: number): string {
           <template v-if="incidentsByDate && serviceId">
             <div
               v-for="inc in (incidentsByDate.get(dateKey(hoveredIndex, days.length)) || []).filter(i => i.serviceId === serviceId || (i.affectedServices && i.affectedServices.split(',').map(Number).includes(serviceId!)))"
-              :key="inc.id"
+              :key="inc.publicHash"
               class="text-xs font-bold mt-1 ml-4.5 px-2 py-1 rounded cursor-pointer transition-colors hover:bg-[var(--button-hover-color)]"
               :class="{
                 'text-red-500 dark:text-red-400': inc.impact === 'critical',
                 'text-orange-500 dark:text-orange-400': inc.impact === 'major',
                 'text-yellow-600 dark:text-yellow-400': inc.impact === 'minor',
               }"
-              @click.stop="router.push(`/incidents/${inc.id}`)"
+              @click.stop="router.push(`/incidents/${inc.publicHash}`)"
             >
               {{ inc.title }}
             </div>

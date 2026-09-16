@@ -101,5 +101,8 @@ func (h *Handler) AdminImport(c *gin.Context) {
 		_ = utils.SetSetting(key, value)
 	}
 
+	// 导入会整体替换服务/事件/维护计划，必须失效公开总览缓存
+	h.InvalidateSummary()
+
 	c.JSON(http.StatusOK, model.APIResponse{Code: 200, Message: "导入成功"})
 }

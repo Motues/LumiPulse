@@ -16,18 +16,47 @@ const form = ref({ title: '', description: '', scheduledStart: '', scheduledEnd:
 const { markClean: cleanMtn, handleClose: closeMtn, restoreFromStorage: restoreMtn } = useUnsavedChanges(form as any, 'mtn_form')
 
 // Timezone helpers: assume all times are CST (UTC+8)
+const CST_OFFSET = '+08:00'
+
+// datetime-local 输入框只接受 "YYYY-MM-DDTHH:mm" 形式（不允许带时区/秒），
+// 因此回填表单时必须把后端存储的 ISO 时间转换成 CST 墙上时间。
+function toDatetimeLocalValue(iso: string): string {
+  if (!iso) return ''
+  // 已经是不带时区的 datetime-local 形式，直接归一化（去掉秒/毫秒）
+  const plain = iso.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/)
+  if (plain) return `${plain[1]}T${plain[2]}`
+  // 带时区的时间（Z 或 ±HH:mm），按 CST 还原成墙上时间
+  const withTz = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + CST_OFFSET
+  const d = new Date(withTz)
+  if (Number.isNaN(d.getTime())) {
+    // 无法解析时退化为截取前 16 个字符，尽量避免把原值丢掉
+    return iso.length >= 16 ? iso.slice(0, 16) : ''
+  }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(d)
+  const get = (t: string) => parts.find(p => p.type === t)?.value || ''
+  const hour = get('hour') === '24' ? '00' : get('hour')
+  return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}`
+}
+
 function toCSTISO(dt: string): string {
   if (!dt) return ''
-  // datetime-local gives "2026-05-20T19:00" (local time without seconds)
-  // Append seconds and CST offset to make it unambiguous
-  return dt + ':00+08:00'
+  // 统一先归一化成 datetime-local，再补上秒和 CST 偏移，避免重复拼接时区
+  const normalized = toDatetimeLocalValue(dt)
+  if (!normalized) return ''
+  return `${normalized}:00${CST_OFFSET}`
 }
 
 function formatCST(iso: string): string {
   if (!iso) return ''
   // If no timezone info in the string, assume CST
-  const s = /[Z+-]/.test(iso) ? iso : iso + '+08:00'
-  return new Date(s).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const s = /[Z+-]/.test(iso) ? iso : iso + CST_OFFSET
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 // Service multi-select
@@ -118,8 +147,10 @@ function openEdit(m: Maintenance) {
   form.value = {
     title: m.title,
     description: m.description || '',
-    scheduledStart: m.scheduledStart,
-    scheduledEnd: m.scheduledEnd,
+    // datetime-local 只能接收 "YYYY-MM-DDTHH:mm"，必须把 ISO 时间按 CST 回填，
+    // 否则输入框会被浏览器判定为非法值而清空，保存时时间就丢了
+    scheduledStart: toDatetimeLocalValue(m.scheduledStart),
+    scheduledEnd: toDatetimeLocalValue(m.scheduledEnd),
     status: m.status,
     affectedServices: m.affectedServices || '',
   }

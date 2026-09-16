@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '../../api/client'
 import type { ServiceDetail as ServiceDetailType } from '../../api/types'
 import { useToast } from '../../composables/useToast'
+import LatencyChart from '../LatencyChart.vue'
 
 const props = defineProps<{
   service: ServiceDetailType
@@ -18,9 +19,8 @@ const statuses = ref<number[]>([])
 const startTime = ref('')
 const intervalMin = ref(5)
 const loading = ref(true)
-const hoverIndex = ref(-1)
 
-const pointCount = computed(() => latencies.value.length)
+const hasData = computed(() => statuses.value.some(s => s !== -1))
 
 const statusLabel: Record<string, string> = { operational: '正常', degraded: '性能下降', outage: '故障' }
 
@@ -33,91 +33,17 @@ const statusClass = (s: string) => {
   }
 }
 
-function timeAtIndex(i: number): string {
-  const t = new Date(startTime.value)
-  t.setMinutes(t.getMinutes() + i * intervalMin.value)
-  return t.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
-
-// SVG chart constants
-const chartW = 800
-const chartH = 250
-const padL = 50
-const padR = 20
-const padT = 20
-const padB = 40
-const plotW = chartW - padL - padR
-const plotH = chartH - padT - padB
-
-const chartData = computed(() => {
-  const n = pointCount.value
-  if (n === 0) return null
-
-  // 只用有数据的点计算Y轴范围
-  let maxLat = 1, minLat = 0
-  const validLatencies = latencies.value.filter((_, i) => statuses.value[i] !== -1)
-  if (validLatencies.length > 0) {
-    maxLat = Math.max(...validLatencies, 1)
-    minLat = Math.min(...validLatencies, 0)
-  }
-  const range = maxLat - minLat || 1
-
-  const toX = (i: number) => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW)
-  const toY = (val: number) => padT + plotH - ((val - minLat) / range) * plotH
-
-  // 按状态分段
-  const statusColors: Record<number, string> = { 0: '#34a761', 1: '#df2d2a', '-1': '#9ca3af' }
-  const segments: { linePath: string; areaPath: string; color: string; status: number }[] = []
-  let segStart = 0
-  for (let i = 1; i <= n; i++) {
-    if (i === n || statuses.value[i] !== statuses.value[segStart]) {
-      const len = i - segStart
-      if (len > 0) {
-        const lp = Array.from({ length: len }, (_, j) =>
-          `${j === 0 ? 'M' : 'L'}${toX(segStart + j).toFixed(1)},${toY(latencies.value[segStart + j]).toFixed(1)}`
-        ).join(' ')
-        const ap = lp + ` L${toX(i - 1).toFixed(1)},${(padT + plotH).toFixed(1)} L${toX(segStart).toFixed(1)},${(padT + plotH).toFixed(1)} Z`
-        segments.push({ linePath: lp, areaPath: ap, color: statusColors[statuses.value[segStart]] || '#9ca3af', status: statuses.value[segStart] })
-      }
-      segStart = i
-    }
-  }
-
-  // Y axis labels (4 ticks)
-  const yTicks: { y: number; label: string }[] = []
-  for (let i = 0; i <= 4; i++) {
-    const val = minLat + (range * i) / 4
-    yTicks.push({ y: toY(val), label: Math.round(val) + 'ms' })
-  }
-
-  // X axis labels (max 8 ticks)
-  const step = Math.max(1, Math.floor(n / 8))
-  const xTicks: { x: number; label: string }[] = []
-  for (let i = 0; i < n; i += step) {
-    xTicks.push({ x: toX(i), label: timeAtIndex(i) })
-  }
-  if (n > 1 && xTicks[xTicks.length - 1]?.x !== toX(n - 1)) {
-    xTicks.push({ x: toX(n - 1), label: timeAtIndex(n - 1) })
-  }
-
-  return { segments, toX, toY, yTicks, xTicks, maxLat, minLat, range }
-})
-
-function onMouseMove(e: MouseEvent) {
-  const n = pointCount.value
-  if (!chartData.value || n === 0) return
-  const svg = (e.currentTarget as SVGElement)
-  const rect = svg.getBoundingClientRect()
-  const scaleX = chartW / rect.width
-  const mouseX = (e.clientX - rect.left) * scaleX
-  const idx = Math.round(((mouseX - padL) / plotW) * (n - 1))
-  hoverIndex.value = Math.max(0, Math.min(idx, n - 1))
-}
-
 async function loadLatency() {
+  const hash = props.service.publicHash
+  if (!hash) {
+    latencies.value = []
+    statuses.value = []
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
-    const res = await api.getServiceLatency(props.service.id, 1)
+    const res = await api.getServiceLatency(hash, 1)
     latencies.value = res.data.latencies
     statuses.value = res.data.statuses
     startTime.value = res.data.start
@@ -131,7 +57,7 @@ async function loadLatency() {
 
 onMounted(loadLatency)
 
-watch(() => props.service.id, () => {
+watch(() => props.service.publicHash, () => {
   loadLatency()
 })
 </script>
@@ -185,73 +111,15 @@ watch(() => props.service.id, () => {
     <div class="rounded-xl p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
       <h3 class="font-bold mb-4" style="color: var(--text-color);">最近24小时延迟</h3>
       <div v-if="loading" class="text-center py-12 " style="color: var(--text-color); opacity: 0.4;">加载中...</div>
-      <div v-else-if="statuses.every(s => s === -1)" class="text-center py-12 " style="color: var(--text-color); opacity: 0.4;">暂无数据</div>
-      <div v-else class="w-full" style="aspect-ratio: 800/250;">
-        <svg
-          :viewBox="`0 0 ${chartW} ${chartH}`"
-          class="w-full h-full"
-          preserveAspectRatio="xMidYMid meet"
-          @mousemove="onMouseMove"
-          @mouseleave="hoverIndex = -1"
-        >
-          <!-- Grid lines -->
-          <line v-for="tick in chartData!.yTicks" :key="tick.label"
-            :x1="padL" :y1="tick.y" :x2="chartW - padR" :y2="tick.y"
-            stroke="var(--button-border-color)" stroke-dasharray="4,4" stroke-width="1"
-          />
-
-          <!-- Y axis labels -->
-          <text v-for="tick in chartData!.yTicks" :key="'yl-' + tick.label"
-            :x="padL - 8" :y="tick.y + 4"
-            text-anchor="end" fill="var(--text-color)" fill-opacity="0.4" style="font-size: 9px;"
-          >{{ tick.label }}</text>
-
-          <!-- X axis labels -->
-          <text v-for="tick in chartData!.xTicks" :key="'xl-' + tick.label"
-            :x="tick.x" :y="chartH - 8"
-            text-anchor="middle" fill="var(--text-color)" fill-opacity="0.4" style="font-size: 9px;"
-          >{{ tick.label }}</text>
-
-          <!-- Colored area fills -->
-          <path v-for="(seg, si) in chartData!.segments" :key="'sa-' + si"
-            :d="seg.areaPath" :fill="seg.color" fill-opacity="0.08"
-          />
-
-          <!-- Colored lines -->
-          <path v-for="(seg, si) in chartData!.segments" :key="'sl-' + si"
-            :d="seg.linePath" fill="none" :stroke="seg.color"
-            stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
-          />
-
-          <!-- Hover crosshair -->
-          <template v-if="hoverIndex >= 0 && hoverIndex < pointCount">
-            <line
-              :x1="chartData!.toX(hoverIndex)" :y1="padT"
-              :x2="chartData!.toX(hoverIndex)" :y2="padT + plotH"
-              stroke="var(--text-color)" stroke-opacity="0.4" stroke-width="1" stroke-dasharray="3,3"
-            />
-            <circle
-              :cx="chartData!.toX(hoverIndex)" :cy="chartData!.toY(latencies[hoverIndex])"
-              r="4" class="fill-emerald-500" stroke="var(--bg-color)" stroke-width="2"
-            />
-            <!-- Tooltip -->
-            <rect
-              :x="chartData!.toX(hoverIndex) - 35" :y="chartData!.toY(latencies[hoverIndex]) - 28"
-              width="70" height="22" rx="4"
-              fill="var(--text-color)"
-            />
-            <text
-              :x="chartData!.toX(hoverIndex)" :y="chartData!.toY(latencies[hoverIndex]) - 13"
-              text-anchor="middle" fill="var(--bg-color)" style="font-size: 9px; font-weight: 500;"
-            >{{ statuses[hoverIndex] === -1 ? '无数据' : latencies[hoverIndex] + 'ms' }}</text>
-          </template>
-        </svg>
-      </div>
-      <div class="flex items-center justify-center gap-4 mt-2 text-xs " style="color: var(--text-color); opacity: 0.4;">
-        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-[#34a761]"></span>正常</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-[#df2d2a]"></span>故障</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-gray-400"></span>无数据</span>
-      </div>
+      <div v-else-if="!hasData" class="text-center py-12 " style="color: var(--text-color); opacity: 0.4;">暂无数据</div>
+      <LatencyChart
+        v-else
+        :latencies="latencies"
+        :statuses="statuses"
+        :start-time="startTime"
+        :interval-min="intervalMin"
+        ring-color="var(--bg-color)"
+      />
     </div>
   </div>
 </template>

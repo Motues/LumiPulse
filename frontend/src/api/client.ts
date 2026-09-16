@@ -33,9 +33,25 @@ async function request<T>(
     throw new Error('Token expired')
   }
 
-  const json = await res.json()
-  if (json.code >= 400) {
+  // 后端可能返回空 body（如未知接口）或 HTML（反代错误页），
+  // 直接 res.json() 会抛出难以理解的解析错误，这里统一转成友好提示。
+  const raw = await res.text()
+  if (!raw) {
+    throw new Error(res.ok ? '服务返回了空响应' : `请求失败 (${res.status})`)
+  }
+
+  let json: any
+  try {
+    json = JSON.parse(raw)
+  } catch {
+    throw new Error(`服务返回了非预期内容 (${res.status})`)
+  }
+
+  if (typeof json?.code === 'number' && json.code >= 400) {
     throw new Error(json.message || 'Request failed')
+  }
+  if (!res.ok) {
+    throw new Error(json?.message || `请求失败 (${res.status})`)
   }
   return json as T
 }
@@ -43,17 +59,22 @@ async function request<T>(
 export const api = {
   // Public
   getSummary: () => request<ApiResponse<import('./types').SummaryResponse>>('GET', '/summary'),
-  getServiceHistory: (id: number, days = 90) =>
-    request<ApiResponse<import('./types').ServiceHistoryResponse>>('GET', `/services/${id}/history?days=${days}`),
-  getServiceLatency: (id: number, days = 1) =>
-    request<ApiResponse<{ start: string; interval: number; latencies: number[]; statuses: number[] }>>('GET', `/services/${id}/latency?days=${days}`),
+  // 公开服务接口一律用随机 hash 定位，不暴露数据库自增 ID
+  getServiceHistory: (hash: string, days = 90) =>
+    request<ApiResponse<import('./types').ServiceHistoryResponse>>('GET', `/services/${encodeURIComponent(hash)}/history?days=${days}`),
+  getServiceLatency: (hash: string, days = 1) =>
+    request<ApiResponse<{ start: string; interval: number; latencies: number[]; statuses: number[] }>>('GET', `/services/${encodeURIComponent(hash)}/latency?days=${days}`),
   getPublicIncidents: (page = 1, limit = 20) =>
     request<ApiResponse<{ incidents: import('./types').Incident[]; pagination: import('./types').Pagination }>>('GET', `/incidents?page=${page}&limit=${limit}`),
-  getPublicIncident: (id: number) =>
-    request<ApiResponse<import('./types').Incident>>('GET', `/incidents/${id}`),
+  // 公开事件详情使用随机 hash 访问，不暴露数据库自增 ID
+  getPublicIncident: (hash: string) =>
+    request<ApiResponse<import('./types').Incident>>('GET', `/incidents/${encodeURIComponent(hash)}`),
   getMaintenances: () => request<ApiResponse<import('./types').Maintenance[]>>('GET', '/maintenances'),
-  getServiceDailyStats: (id: number, days = 90) =>
-    request<ApiResponse<import('./types').ServiceDailyStats>>('GET', `/services/${id}/daily-stats?days=${days}`),
+  getServiceDailyStats: (hash: string, days = 90) =>
+    request<ApiResponse<import('./types').ServiceDailyStats>>('GET', `/services/${encodeURIComponent(hash)}/daily-stats?days=${days}`),
+  // 批量版本：首页一次性取回所有服务的状态矩阵，避免按服务逐个请求
+  getBatchDailyStats: (days = 90) =>
+    request<ApiResponse<import('./types').BatchDailyStatsResponse>>('GET', `/daily-stats?days=${days}`),
   getSiteConfig: () =>
     request<ApiResponse<Record<string, string>>>('GET', '/site-config'),
   getPublicServices: () =>
@@ -78,6 +99,9 @@ export const api = {
 
   // Admin - Dashboard
   getStats: () => request<ApiResponse<import('./types').DashboardStats>>('GET', '/admin/stats', undefined, true),
+  // 管理端批量每日统计（含未在首页展示的服务）
+  getAdminBatchDailyStats: (days = 90) =>
+    request<ApiResponse<import('./types').BatchDailyStatsResponse>>('GET', `/admin/daily-stats?days=${days}`, undefined, true),
 
   // Admin - Profile
   getCurrentUser: () => request<ApiResponse<{ username: string }>>('GET', '/admin/current-user', undefined, true),

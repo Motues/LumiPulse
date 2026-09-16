@@ -3,8 +3,8 @@ package http
 import (
 	"fmt"
 	"lumipluse-backend/internal/model"
-	"net/http"
 	"lumipluse-backend/internal/pkg/utils"
+	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -50,12 +50,15 @@ func (h *Handler) CreateService(c *gin.Context) {
 		Type:        req.Type,
 		Interval:    req.Interval,
 		SortOrder:   req.SortOrder,
-		}
-		if req.ShowOnHomepage != nil {
-			svc.ShowOnHomepage = *req.ShowOnHomepage
-		}
+	}
+	if req.ShowOnHomepage != nil {
+		svc.ShowOnHomepage = *req.ShowOnHomepage
+	}
+	if req.InsecureSkipVerify != nil {
+		svc.InsecureSkipVerify = *req.InsecureSkipVerify
+	}
 
-		if err := h.Repo.CreateService(c.Request.Context(), svc); err != nil {
+	if err := h.Repo.CreateService(c.Request.Context(), svc); err != nil {
 		utils.Error("create service failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to create service"})
 		return
@@ -72,6 +75,7 @@ func (h *Handler) CreateService(c *gin.Context) {
 	}
 
 	auditLog("service.create", fmt.Sprintf("name=%s url=%s", svc.Name, svc.URL))
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusCreated, model.APIResponse{
 		Code:    201,
@@ -125,6 +129,9 @@ func (h *Handler) UpdateService(c *gin.Context) {
 	if req.ShowOnHomepage != nil {
 		svc.ShowOnHomepage = *req.ShowOnHomepage
 	}
+	if req.InsecureSkipVerify != nil {
+		svc.InsecureSkipVerify = *req.InsecureSkipVerify
+	}
 	svc.SortOrder = req.SortOrder
 
 	if err := h.Repo.UpdateService(c.Request.Context(), svc); err != nil {
@@ -134,6 +141,7 @@ func (h *Handler) UpdateService(c *gin.Context) {
 	}
 
 	auditLog("service.update", fmt.Sprintf("id=%d name=%s", svc.ID, svc.Name))
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
@@ -162,6 +170,7 @@ func (h *Handler) DeleteService(c *gin.Context) {
 	if svc != nil {
 		auditLog("service.delete", fmt.Sprintf("id=%d name=%s", id, svc.Name))
 	}
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
@@ -186,6 +195,7 @@ func (h *Handler) AdminReorderServices(c *gin.Context) {
 	}
 
 	auditLog("service.reorder", fmt.Sprintf("count=%d", len(req.Services)))
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
@@ -204,8 +214,8 @@ func (h *Handler) AdminListServices(c *gin.Context) {
 
 	type ServiceDetail struct {
 		model.Service
-		Uptime    float64 `json:"uptime"`
-		Latency   int     `json:"latency"`
+		Uptime  float64 `json:"uptime"`
+		Latency int     `json:"latency"`
 	}
 
 	svcIDs := make([]int64, len(services))
@@ -214,11 +224,11 @@ func (h *Handler) AdminListServices(c *gin.Context) {
 	}
 	uptimeMap := h.batchCalcUptime(c, svcIDs, 90)
 
-	// Batch load latest heartbeat for all services
+	// Batch load latest heartbeat for all services（避免按服务逐个查询）
 	latencyMap := make(map[int64]int, len(services))
-	for _, svc := range services {
-		if hb, err := h.Repo.GetLatestHeartbeat(c.Request.Context(), svc.ID); err == nil {
-			latencyMap[svc.ID] = hb.Latency
+	if hbMap, err := h.Repo.BatchGetLatestHeartbeats(c.Request.Context(), svcIDs); err == nil {
+		for id, hb := range hbMap {
+			latencyMap[id] = hb.Latency
 		}
 	}
 

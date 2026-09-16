@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -10,13 +11,16 @@ import (
 
 func (r *repo) CreateIncident(ctx context.Context, inc *model.Incident) error {
 	now := time.Now().Format(time.RFC3339)
+	if inc.PublicHash == "" {
+		inc.PublicHash = utils.GeneratePublicHash()
+	}
 	var parentID interface{}
 	if inc.ParentID != nil {
 		parentID = *inc.ParentID
 	}
-	query := `INSERT INTO Incident (service_id, title, impact, status, affected_services, parent_id, resolved_at, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := r.db.ExecContext(ctx, query, inc.ServiceID, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, nil, now, now)
+	query := `INSERT INTO Incident (public_hash, service_id, title, impact, status, affected_services, parent_id, resolved_at, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := r.db.ExecContext(ctx, query, inc.PublicHash, inc.ServiceID, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, nil, now, now)
 	if err != nil {
 		return err
 	}
@@ -38,6 +42,20 @@ func (r *repo) GetIncident(ctx context.Context, id int64) (*model.Incident, erro
 	}
 	// Load children
 	children, err := r.ListChildIncidents(ctx, id)
+	if err == nil {
+		inc.Children = children
+	}
+	return &inc, nil
+}
+
+// GetIncidentByHash 通过公开标识获取事件（公开页面使用，替代自增 ID）
+func (r *repo) GetIncidentByHash(ctx context.Context, hash string) (*model.Incident, error) {
+	var inc model.Incident
+	err := r.db.GetContext(ctx, &inc, "SELECT * FROM Incident WHERE public_hash = ?", hash)
+	if err != nil {
+		return nil, err
+	}
+	children, err := r.ListChildIncidents(ctx, inc.ID)
 	if err == nil {
 		inc.Children = children
 	}
@@ -79,6 +97,15 @@ func (r *repo) ListServiceIncidents(ctx context.Context, serviceID int64, days i
 	since := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
 	query := `SELECT * FROM Incident WHERE service_id = ? AND created_at >= ? ORDER BY created_at ASC`
 	err := r.db.SelectContext(ctx, &incidents, query, serviceID, since)
+	return incidents, err
+}
+
+// ListIncidentsSince 一次取回窗口内所有服务的事件，供批量每日统计使用（避免按服务逐个查询）。
+func (r *repo) ListIncidentsSince(ctx context.Context, days int) ([]*model.Incident, error) {
+	var incidents []*model.Incident
+	since := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	query := `SELECT * FROM Incident WHERE created_at >= ? ORDER BY created_at ASC`
+	err := r.db.SelectContext(ctx, &incidents, query, since)
 	return incidents, err
 }
 

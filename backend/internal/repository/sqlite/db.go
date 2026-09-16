@@ -31,6 +31,9 @@ func InitSchema(db *sqlx.DB) error {
 		status TEXT DEFAULT 'operational',
 		is_active INTEGER DEFAULT 1,
 		sort_order INTEGER DEFAULT 0,
+		show_on_homepage INTEGER DEFAULT 1,
+		insecure_skip_verify INTEGER DEFAULT 0,
+		public_hash TEXT DEFAULT '',
 		created_at DATETIME DEFAULT (datetime('now')),
 		updated_at DATETIME DEFAULT (datetime('now'))
 	);
@@ -58,6 +61,7 @@ func InitSchema(db *sqlx.DB) error {
 
 	CREATE TABLE IF NOT EXISTS Incident (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		public_hash TEXT DEFAULT '',
 		service_id INTEGER NOT NULL REFERENCES Service(id) ON DELETE CASCADE,
 		title TEXT NOT NULL,
 		impact TEXT NOT NULL,
@@ -157,9 +161,19 @@ func InitSchema(db *sqlx.DB) error {
 		`ALTER TABLE Incident ADD COLUMN parent_id INTEGER DEFAULT NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_incident_parent ON Incident(parent_id)`,
 		`ALTER TABLE Service ADD COLUMN show_on_homepage INTEGER DEFAULT 1`,
+		// 每个服务可单独跳过 HTTPS 证书校验（默认关闭）
+		`ALTER TABLE Service ADD COLUMN insecure_skip_verify INTEGER DEFAULT 0`,
+		// 服务公开标识：旧数据用随机值回填，公开详情页改用该值访问，避免暴露自增 ID
+		`ALTER TABLE Service ADD COLUMN public_hash TEXT DEFAULT ''`,
+		`UPDATE Service SET public_hash = lower(hex(randomblob(16))) WHERE public_hash IS NULL OR public_hash = ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_service_public_hash ON Service(public_hash)`,
 		`ALTER TABLE Subscriber ADD COLUMN subscribed_services TEXT DEFAULT ''`,
 		`ALTER TABLE Incident ADD COLUMN resolved_at DATETIME DEFAULT NULL`,
 		`UPDATE Incident SET resolved_at = (SELECT MAX(created_at) FROM Incident_Update WHERE incident_id = Incident.id AND status = 'resolved') WHERE status = 'resolved' AND resolved_at IS NULL`,
+		// 事件公开标识：旧数据用随机值回填，公开页面改用该值访问，避免暴露自增 ID
+		`ALTER TABLE Incident ADD COLUMN public_hash TEXT DEFAULT ''`,
+		`UPDATE Incident SET public_hash = lower(hex(randomblob(16))) WHERE public_hash IS NULL OR public_hash = ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_public_hash ON Incident(public_hash)`,
 	}
 	for _, m := range migrations {
 		db.Exec(m) // ignore errors (column may already exist)

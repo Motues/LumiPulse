@@ -123,15 +123,16 @@ function formatDateTime(iso: string): string {
 
 onMounted(async () => {
   document.addEventListener('click', closeThemeMenu)
-  const id = Number(route.params.id)
-  if (!id) {
-    error.value = '无效的事件ID'
+  // 公开详情页使用随机 hash 访问，不再暴露自增 ID
+  const hash = String(route.params.hash || '').trim()
+  if (!hash) {
+    error.value = '无效的事件标识'
     loading.value = false
     return
   }
   try {
     const [incRes, sumRes] = await Promise.all([
-      api.getPublicIncident(id),
+      api.getPublicIncident(hash),
       api.getSummary(),
     ])
     incident.value = incRes.data

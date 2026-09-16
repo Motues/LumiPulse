@@ -9,12 +9,18 @@ export interface Service {
   isActive: boolean
   sortOrder: number
   showOnHomepage: boolean
+  /** 公开访问标识：公开页面的服务详情 URL 使用它，而不是自增 id */
+  publicHash: string
+  /** 仅对该服务跳过 HTTPS 证书校验（自签证书的内网服务） */
+  insecureSkipVerify: boolean
   createdAt: string
   updatedAt: string
 }
 
 export interface ServiceSummary {
   id: number
+  /** 公开访问标识：公开页面的服务详情 URL 使用它，而不是自增 id */
+  publicHash: string
   name: string
   status: 'operational' | 'degraded' | 'outage'
   url: string
@@ -49,6 +55,7 @@ export interface IncidentUpdate {
 
 export interface Incident {
   id: number
+  publicHash: string
   serviceId: number
   title: string
   impact: 'minor' | 'major' | 'critical'
@@ -123,7 +130,15 @@ export interface DailyStat {
 
 export interface ServiceDailyStats {
   serviceId: number
+  /** 公开访问标识：公开页面用它拼服务详情 URL */
+  publicHash: string
   days: [number, number, number][]
+}
+
+/** 批量每日统计接口响应 */
+export interface BatchDailyStatsResponse {
+  days: number
+  services: ServiceDailyStats[]
 }
 
 export interface ApiResponse<T = any> {

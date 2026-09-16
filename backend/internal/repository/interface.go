@@ -10,6 +10,7 @@ type Repository interface {
 	CreateService(ctx context.Context, s *model.Service) error
 	ListServices(ctx context.Context) ([]*model.Service, error)
 	GetService(ctx context.Context, id int64) (*model.Service, error)
+	GetServiceByHash(ctx context.Context, hash string) (*model.Service, error)
 	UpdateService(ctx context.Context, s *model.Service) error
 	UpdateServiceSortOrder(ctx context.Context, id int64, sortOrder int) error
 	DeleteService(ctx context.Context, id int64) error
@@ -18,6 +19,8 @@ type Repository interface {
 	CreateHeartbeat(ctx context.Context, h *model.Heartbeat) error
 	GetServiceHistory(ctx context.Context, serviceID int64, days int) ([]*model.Heartbeat, error)
 	GetLatestHeartbeat(ctx context.Context, serviceID int64) (*model.Heartbeat, error)
+	BatchGetLatestHeartbeats(ctx context.Context, serviceIDs []int64) (map[int64]*model.Heartbeat, error)
+	GetLatencyBuckets(ctx context.Context, serviceID int64, since string, bucketSeconds, maxBucket int) ([]*model.LatencyBucket, error)
 	ListHeartbeats(ctx context.Context, serviceID int64, statusFilter string, page, limit int) ([]*model.LogEntry, int64, error)
 	DeleteOldHeartbeats(ctx context.Context, before string) error
 
@@ -31,9 +34,11 @@ type Repository interface {
 	// Incident
 	CreateIncident(ctx context.Context, inc *model.Incident) error
 	GetIncident(ctx context.Context, id int64) (*model.Incident, error)
+	GetIncidentByHash(ctx context.Context, hash string) (*model.Incident, error)
 	ListIncidents(ctx context.Context, page, limit int) ([]*model.Incident, int64, error)
 	ListActiveIncidents(ctx context.Context) ([]*model.Incident, error)
 	ListServiceIncidents(ctx context.Context, serviceID int64, days int) ([]*model.Incident, error)
+	ListIncidentsSince(ctx context.Context, days int) ([]*model.Incident, error)
 	CountRecentIncidents(ctx context.Context, days int) (total int64, resolved int64, err error)
 	GetActiveIncidentByService(ctx context.Context, serviceID int64) (*model.Incident, error)
 	UpdateIncident(ctx context.Context, inc *model.Incident) error
@@ -91,6 +96,6 @@ type Repository interface {
 	ListIncidentsByServer(ctx context.Context, serverID int64) ([]*model.Incident, error)
 	ListChildIncidents(ctx context.Context, parentID int64) ([]*model.Incident, error)
 	UpdateChildrenStatus(ctx context.Context, parentID int64, status string) error
-		// Data export/import
-		ImportFullData(ctx context.Context, data *model.ImportData) error
+	// Data export/import
+	ImportFullData(ctx context.Context, data *model.ImportData) error
 }

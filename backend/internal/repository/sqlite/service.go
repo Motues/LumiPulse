@@ -3,15 +3,21 @@ package sqlite
 import (
 	"context"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 func (r *repo) CreateService(ctx context.Context, s *model.Service) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, created_at, updated_at)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if s.PublicHash == "" {
+		s.PublicHash = utils.GeneratePublicHash()
+	}
+	query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, insecure_skip_verify, public_hash, created_at, updated_at)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	res, err := r.db.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
-		"operational", true, s.SortOrder, s.ShowOnHomepage, now, now)
+		"operational", true, s.SortOrder, s.ShowOnHomepage, s.InsecureSkipVerify, s.PublicHash, now, now)
 	if err != nil {
 		return err
 	}
@@ -26,7 +32,7 @@ func (r *repo) CreateService(ctx context.Context, s *model.Service) error {
 
 func (r *repo) ListServices(ctx context.Context) ([]*model.Service, error) {
 	var services []*model.Service
-	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, created_at, updated_at
+	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, insecure_skip_verify, public_hash, created_at, updated_at
 			  FROM Service ORDER BY sort_order ASC, id ASC`
 	err := r.db.SelectContext(ctx, &services, query)
 	return services, err
@@ -34,18 +40,27 @@ func (r *repo) ListServices(ctx context.Context) ([]*model.Service, error) {
 
 func (r *repo) GetService(ctx context.Context, id int64) (*model.Service, error) {
 	var s model.Service
-	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, created_at, updated_at
+	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, insecure_skip_verify, public_hash, created_at, updated_at
 			  FROM Service WHERE id = ?`
 	err := r.db.GetContext(ctx, &s, query, id)
 	return &s, err
 }
 
+// GetServiceByHash 通过公开标识获取服务（公开页面使用，替代自增 ID）
+func (r *repo) GetServiceByHash(ctx context.Context, hash string) (*model.Service, error) {
+	var s model.Service
+	query := `SELECT id, name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, insecure_skip_verify, public_hash, created_at, updated_at
+			  FROM Service WHERE public_hash = ?`
+	err := r.db.GetContext(ctx, &s, query, hash)
+	return &s, err
+}
+
 func (r *repo) UpdateService(ctx context.Context, s *model.Service) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	query := `UPDATE Service SET name=?, description=?, url=?, type=?, interval=?, status=?, is_active=?, sort_order=?, show_on_homepage=?, updated_at=?
+	query := `UPDATE Service SET name=?, description=?, url=?, type=?, interval=?, status=?, is_active=?, sort_order=?, show_on_homepage=?, insecure_skip_verify=?, updated_at=?
 			  WHERE id=?`
 	_, err := r.db.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
-		s.Status, s.IsActive, s.SortOrder, s.ShowOnHomepage, now, s.ID)
+		s.Status, s.IsActive, s.SortOrder, s.ShowOnHomepage, s.InsecureSkipVerify, now, s.ID)
 	if err != nil {
 		return err
 	}
@@ -147,6 +162,56 @@ func (r *repo) GetLatestHeartbeat(ctx context.Context, serviceID int64) (*model.
 			  FROM Heartbeat WHERE service_id = ? ORDER BY created_at DESC LIMIT 1`
 	err := r.db.GetContext(ctx, &h, query, serviceID)
 	return &h, err
+}
+
+// BatchGetLatestHeartbeats 一次性取回多个服务各自的最新心跳，避免按服务逐个查询（N+1）。
+func (r *repo) BatchGetLatestHeartbeats(ctx context.Context, serviceIDs []int64) (map[int64]*model.Heartbeat, error) {
+	result := make(map[int64]*model.Heartbeat)
+	if len(serviceIDs) == 0 {
+		return result, nil
+	}
+
+	query := `SELECT h.id, h.service_id, h.status, h.latency, h.message, h.created_at
+			  FROM Heartbeat h
+			  INNER JOIN (
+				SELECT service_id, MAX(created_at) AS max_created
+				FROM Heartbeat WHERE service_id IN (?) GROUP BY service_id
+			  ) m ON h.service_id = m.service_id AND h.created_at = m.max_created
+			  GROUP BY h.service_id`
+	query, args, err := sqlx.In(query, serviceIDs)
+	if err != nil {
+		return result, err
+	}
+	query = r.db.Rebind(query)
+
+	var rows []*model.Heartbeat
+	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return result, err
+	}
+	for _, hb := range rows {
+		result[hb.ServiceID] = hb
+	}
+	return result, nil
+}
+
+// GetLatencyBuckets 在 SQLite 内把心跳按固定时间桶聚合，避免把窗口内所有原始行搬到 Go。
+// since 需为 UTC 的 "2006-01-02 15:04:05" 格式（SQLite 按 UTC 解析不带时区的时间）。
+func (r *repo) GetLatencyBuckets(ctx context.Context, serviceID int64, since string, bucketSeconds, maxBucket int) ([]*model.LatencyBucket, error) {
+	// 失败判定与日志页保持一致：成功 = (200<=status<400) 或 status=1（TCP 成功）
+	query := `SELECT
+		CAST((strftime('%s', created_at) - strftime('%s', ?)) / ? AS INTEGER) AS bucket,
+		CAST(AVG(latency) AS INTEGER) AS avg_latency,
+		SUM(CASE WHEN NOT ((status >= 200 AND status < 400) OR status = 1) THEN 1 ELSE 0 END) AS failures,
+		COUNT(*) AS total
+		FROM Heartbeat
+		WHERE service_id = ? AND created_at >= ?
+		GROUP BY bucket
+		HAVING bucket >= 0 AND bucket < ?
+		ORDER BY bucket ASC`
+
+	var buckets []*model.LatencyBucket
+	err := r.db.SelectContext(ctx, &buckets, query, since, bucketSeconds, serviceID, since, maxBucket)
+	return buckets, err
 }
 
 func (r *repo) DeleteOldHeartbeats(ctx context.Context, before string) error {

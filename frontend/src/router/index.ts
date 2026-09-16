@@ -9,7 +9,15 @@ const router = createRouter({
       component: () => import('../views/HomePage.vue'),
     },
     {
-      path: '/incidents/:id',
+      // 服务详情仍复用首页（内联展开），但用随机 hash 作为可分享的 URL，
+      // 避免公开页出现自增 ID
+      path: '/services/:hash',
+      name: 'service-detail',
+      component: () => import('../views/HomePage.vue'),
+    },
+    {
+      // 使用随机 hash 而非自增 ID 访问事件详情页
+      path: '/incidents/:hash',
       name: 'incident-detail',
       component: () => import('../views/IncidentDetailPage.vue'),
     },

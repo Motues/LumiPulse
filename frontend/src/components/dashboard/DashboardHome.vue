@@ -54,13 +54,26 @@ const statusClass = (s: string) => {
 
 async function loadDailyStats() {
   if (!stats.value) return
-  for (const svc of stats.value.services) {
-    try {
-      const res = await api.getServiceDailyStats(svc.id, 30)
-      dailyStats.value.set(svc.id, res.data.days)
-    } catch {
-      dailyStats.value.set(svc.id, Array.from({ length: 30 }, () => [-1, -1, -1] as [number, number, number]))
+  const days = 30
+  try {
+    // 一次批量请求取回所有服务的矩阵数据（原先按服务逐个 await）
+    const res = await api.getAdminBatchDailyStats(days)
+    const map = new Map<number, [number, number, number][]>()
+    for (const item of res.data.services) {
+      map.set(item.serviceId, item.days)
     }
+    for (const svc of stats.value.services) {
+      if (!map.has(svc.id)) {
+        map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+      }
+    }
+    dailyStats.value = map
+  } catch {
+    const map = new Map<number, [number, number, number][]>()
+    for (const svc of stats.value.services) {
+      map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+    }
+    dailyStats.value = map
   }
 }
 

@@ -11,11 +11,15 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 		v1.GET("/health", h.Health)
 		v1.GET("/summary", h.GetSummary)
 		v1.GET("/services", h.ListServices)
-		v1.GET("/services/:id/history", h.GetServiceHistory)
-		v1.GET("/services/:id/latency", h.GetServiceLatency)
-		v1.GET("/services/:id/daily-stats", h.GetDailyStats)
+		// 批量每日统计：首页一次性取回所有服务的状态矩阵，避免 N+1 请求
+		v1.GET("/daily-stats", h.GetBatchDailyStats)
+		// 公开服务接口一律用随机 hash 定位，不暴露自增 ID
+		v1.GET("/services/:hash/history", h.GetServiceHistory)
+		v1.GET("/services/:hash/latency", h.GetServiceLatency)
+		v1.GET("/services/:hash/daily-stats", h.GetDailyStats)
 		v1.GET("/incidents", h.ListIncidents)
-		v1.GET("/incidents/:id", h.GetPublicIncident)
+		// 公开详情使用随机 hash 访问，不暴露自增 ID
+		v1.GET("/incidents/:hash", h.GetPublicIncident)
 		v1.GET("/maintenances", h.ListMaintenances)
 		v1.GET("/site-config", h.GetSiteConfig)
 		v1.POST("/subscribe", h.Subscribe)
@@ -36,6 +40,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 		{
 			// Dashboard
 			auth.GET("/stats", h.AdminStats)
+			// 批量每日统计（含未在首页展示的服务），避免管理端按服务逐个请求
+			auth.GET("/daily-stats", h.AdminBatchDailyStats)
 
 			// Logs
 			auth.GET("/logs", h.AdminListLogs)
@@ -97,9 +103,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 			// Subscribers
 			auth.GET("/subscribers", h.AdminListSubscribers)
 			auth.DELETE("/subscribers/:id", h.AdminDeleteSubscriber)
-				// Data export/import
-				auth.GET("/export", h.AdminExport)
-				auth.POST("/import", h.AdminImport)
+			// Data export/import
+			auth.GET("/export", h.AdminExport)
+			auth.POST("/import", h.AdminImport)
 		}
 	}
 }

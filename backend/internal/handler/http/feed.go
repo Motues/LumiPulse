@@ -70,6 +70,26 @@ func (h *Handler) buildFeed(c *gin.Context, feedType string) (string, error) {
 	return h.buildAtom(baseURL, siteName, incidents, updatesMap, atomNow), nil
 }
 
+// parseFeedTime 兼容多种时间格式解析事件时间。
+// 事件时间由 time.Now().Format(time.RFC3339) 写入（可能是 +08:00 偏移），
+// 早期数据也可能是 UTC 的 …Z，这里统一兼容，避免解析失败后把原始字符串
+// 当成 pubDate 输出（那不是合法的 RFC1123，阅读器会解析错误）。
+func parseFeedTime(s string) (time.Time, bool) {
+	layouts := []string{
+		time.RFC3339,     // 2026-05-20T10:00:00+08:00
+		time.RFC3339Nano, // 带纳秒
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+	}
+	for _, l := range layouts {
+		if t, err := time.Parse(l, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func (h *Handler) buildRSS(baseURL, siteName string, incidents []*model.Incident, updatesMap map[int64][]*model.IncidentUpdate, now string) string {
 	var items strings.Builder
 	for _, inc := range incidents {
@@ -90,12 +110,12 @@ func (h *Handler) buildRSS(baseURL, siteName string, incidents []*model.Incident
 		}
 
 		pubDate := inc.CreatedAt
-		if t, err := time.Parse("2006-01-02T15:04:05Z", inc.CreatedAt); err == nil {
+		if t, ok := parseFeedTime(inc.CreatedAt); ok {
 			pubDate = t.Format(time.RFC1123Z)
 		}
 
-		link := fmt.Sprintf("%s/incidents/%d", baseURL, inc.ID)
-		guid := fmt.Sprintf("%s/incidents/%d", baseURL, inc.ID)
+		link := fmt.Sprintf("%s/incidents/%s", baseURL, inc.PublicHash)
+		guid := fmt.Sprintf("%s/incidents/%s", baseURL, inc.PublicHash)
 
 		items.WriteString(fmt.Sprintf(`    <item>
       <title>%s</title>
@@ -143,16 +163,16 @@ func (h *Handler) buildAtom(baseURL, siteName string, incidents []*model.Inciden
 
 		updated := inc.UpdatedAt
 		published := inc.CreatedAt
-		if t, err := time.Parse("2006-01-02T15:04:05Z", inc.UpdatedAt); err == nil {
-			updated = t.Format("2006-01-02T15:04:05Z")
+		if t, ok := parseFeedTime(inc.UpdatedAt); ok {
+			updated = t.UTC().Format("2006-01-02T15:04:05Z")
 		}
-		if t, err := time.Parse("2006-01-02T15:04:05Z", inc.CreatedAt); err == nil {
-			published = t.Format("2006-01-02T15:04:05Z")
+		if t, ok := parseFeedTime(inc.CreatedAt); ok {
+			published = t.UTC().Format("2006-01-02T15:04:05Z")
 		}
 
-		link := fmt.Sprintf("%s/incidents/%d", baseURL, inc.ID)
-		id := fmt.Sprintf("tag:%s,%s:/incidents/%d",
-			host, inc.CreatedAt[:10], inc.ID)
+		link := fmt.Sprintf("%s/incidents/%s", baseURL, inc.PublicHash)
+		id := fmt.Sprintf("tag:%s,%s:/incidents/%s",
+			host, inc.CreatedAt[:10], inc.PublicHash)
 
 		entries.WriteString(fmt.Sprintf(`  <entry>
     <title>%s</title>

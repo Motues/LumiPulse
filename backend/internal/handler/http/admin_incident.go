@@ -58,6 +58,7 @@ func (h *Handler) CreateIncident(c *gin.Context) {
 		h.Repo.UpdateService(c.Request.Context(), svc)
 	}
 	auditLog("incident.create", fmt.Sprintf("title=%s impact=%s", inc.Title, inc.Impact))
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusCreated, model.APIResponse{
 		Code:    201,
@@ -120,6 +121,8 @@ func (h *Handler) CreateIncidentUpdate(c *gin.Context) {
 		}
 		h.Repo.UpdateService(c.Request.Context(), svc)
 	}
+
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusCreated, model.APIResponse{
 		Code:    201,
@@ -230,6 +233,8 @@ func (h *Handler) UpdateIncident(c *gin.Context) {
 		h.Repo.UpdateChildrenStatus(c.Request.Context(), id, req.Status)
 	}
 
+	h.InvalidateSummary()
+
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Incident updated",
@@ -261,6 +266,8 @@ func (h *Handler) DeleteIncident(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete incident"})
 		return
 	}
+
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
@@ -421,6 +428,8 @@ func (h *Handler) MergeIncident(c *gin.Context) {
 	// Reload target with children
 	target, _ = h.Repo.GetIncident(c.Request.Context(), targetID)
 
+	h.InvalidateSummary()
+
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Incidents merged",
@@ -473,6 +482,7 @@ func (h *Handler) SplitIncident(c *gin.Context) {
 	})
 
 	auditLog("incident.split", fmt.Sprintf("id=%d parent=%d", id, parentID))
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,

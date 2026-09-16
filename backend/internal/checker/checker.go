@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"lumipluse-backend/internal/config"
 	"lumipluse-backend/internal/model"
 	"lumipluse-backend/internal/pkg/utils"
 	"lumipluse-backend/internal/repository"
@@ -45,44 +46,103 @@ func inMaintenance(maintenances []*model.Maintenance) bool {
 type probeTaskState struct {
 	consecutiveFailures  int
 	consecutiveSuccesses int
-	autoIncidentID       int64 // 0 = no auto-incident
+	autoIncidentID       int64     // 0 = no auto-incident
+	nextDue              time.Time // 下次到期探测时间（按服务自身 interval 计算）
+}
+
+// 调度与并发参数
+const (
+	// schedulerTick 调度器心跳。取 5s 以便能表达最短 10s 的探测间隔。
+	schedulerTick = 5 * time.Second
+	// maxProbeConcurrency 单轮探测的最大并发数（有界 worker pool）
+	maxProbeConcurrency = 8
+)
+
+// probeTarget 一次待执行的探测
+type probeTarget struct {
+	svc  *model.Service
+	task *model.ProbeTask
 }
 
 type HealthChecker struct {
 	repo     repository.Repository
 	interval time.Duration
-	client   *http.Client
-	states   map[int64]*probeTaskState // key = serviceID
-	mu       sync.Mutex
-	stop     chan struct{}
-	wg       sync.WaitGroup
+	// globalInsecure 全局跳过 TLS 校验（配置文件开关，作用范围大，默认关闭）
+	globalInsecure bool
+	secureClient   *http.Client
+	insecureClient *http.Client
+	states         map[int64]*probeTaskState // key = serviceID
+	mu             sync.Mutex
+	stop           chan struct{}
+	wg             sync.WaitGroup
+	// onDataChange 数据变化回调（用于失效公开页缓存）
+	onDataChange func()
+}
+
+func newHTTPClient(insecure bool) *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
 }
 
 func New(repo repository.Repository, insecureSkipVerify bool) *HealthChecker {
 	return &HealthChecker{
-		repo:     repo,
-		interval: 1 * time.Minute,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: insecureSkipVerify},
-			},
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return fmt.Errorf("too many redirects")
-				}
-				return nil
-			},
-		},
-		states: make(map[int64]*probeTaskState),
-		stop:   make(chan struct{}),
+		repo:           repo,
+		interval:       schedulerTick,
+		globalInsecure: insecureSkipVerify,
+		secureClient:   newHTTPClient(false),
+		insecureClient: newHTTPClient(true),
+		states:         make(map[int64]*probeTaskState),
+		stop:           make(chan struct{}),
 	}
+}
+
+// SetOnDataChange 注册数据变化回调。检查器会自动创建/解决事件并改动服务状态，
+// 这些变更同样需要让公开页缓存失效。
+func (hc *HealthChecker) SetOnDataChange(fn func()) {
+	hc.onDataChange = fn
+}
+
+func (hc *HealthChecker) dataChanged() {
+	if hc.onDataChange != nil {
+		hc.onDataChange()
+	}
+}
+
+// clientFor 根据服务配置选择 HTTP 客户端：只有显式开启（服务级或全局）才跳过校验。
+func (hc *HealthChecker) clientFor(svc *model.Service) *http.Client {
+	if hc.globalInsecure || svc.InsecureSkipVerify {
+		return hc.insecureClient
+	}
+	return hc.secureClient
+}
+
+// probeInterval 返回服务的探测间隔（秒）。校验范围是 10~3600 秒，
+// 这里再做一次兜底，避免脏数据导致过于频繁或永不探测。
+func probeInterval(svc *model.Service) time.Duration {
+	sec := svc.Interval
+	if sec < 10 {
+		sec = 60
+	}
+	if sec > 3600 {
+		sec = 3600
+	}
+	return time.Duration(sec) * time.Second
 }
 
 func (hc *HealthChecker) Start(ctx context.Context) {
 	hc.wg.Add(1)
 	go hc.loop(ctx)
-	utils.Info("checker started (interval: 1m)")
+	utils.Info("checker started (scheduler tick: %s)", schedulerTick)
 }
 
 func (hc *HealthChecker) Stop() {
@@ -96,6 +156,7 @@ func (hc *HealthChecker) loop(ctx context.Context) {
 
 	hc.cleanup(ctx)
 	lastCleanup := time.Now()
+	lastTokenGC := time.Now()
 
 	ticker := time.NewTicker(hc.interval)
 	defer ticker.Stop()
@@ -113,9 +174,16 @@ func (hc *HealthChecker) loop(ctx context.Context) {
 			hc.checkAll(ctx)
 			hc.reconcileMaintenanceStatus(ctx)
 
-			if time.Since(lastCleanup) > 24*time.Hour {
+			now := time.Now()
+			if now.Sub(lastCleanup) > 24*time.Hour {
 				hc.cleanup(ctx)
-				lastCleanup = time.Now()
+				lastCleanup = now
+			}
+			if now.Sub(lastTokenGC) > 10*time.Minute {
+				if n := utils.CleanupExpiredTokens(); n > 0 {
+					utils.Info("cleaned up %d expired admin sessions", n)
+				}
+				lastTokenGC = now
 			}
 		}
 	}
@@ -139,8 +207,6 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		taskMap[t.ServiceID] = t
 	}
 
-	today := time.Now().Format("2006-01-02")
-
 	// Build set of service IDs under active maintenance
 	inMaint := make(map[int64]bool)
 	if maints, err := hc.repo.ListMaintenances(ctx); err == nil {
@@ -156,38 +222,92 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		}
 	}
 
+	now := time.Now()
+	alive := make(map[int64]bool, len(services))
+	dueTargets := make([]probeTarget, 0, len(services))
+
 	for _, svc := range services {
+		alive[svc.ID] = true
+
 		if !svc.IsActive {
 			continue
 		}
-
 		// Check if service has an active probe task
 		task, hasTask := taskMap[svc.ID]
 		if !hasTask || !task.IsActive {
 			continue
 		}
 
-		status, latency, message := hc.performCheck(svc)
-
-		// Record heartbeat
-		hb := &model.Heartbeat{
-			ServiceID: svc.ID,
-			Status:    status,
-			Latency:   latency,
-			Message:   message,
+		// 按服务自身的 interval 判断是否到期，而不是所有服务共用一个固定周期
+		hc.mu.Lock()
+		st, exists := hc.states[svc.ID]
+		if !exists {
+			st = &probeTaskState{}
+			hc.states[svc.ID] = st
 		}
-		if err := hc.repo.CreateHeartbeat(ctx, hb); err != nil {
-			utils.Info("checker create heartbeat failed for service %d: %v", svc.ID, err)
+		isDue := st.nextDue.IsZero() || !now.Before(st.nextDue)
+		if isDue {
+			st.nextDue = now.Add(probeInterval(svc))
 		}
+		hc.mu.Unlock()
 
-		// Update daily record
-		daily, err := hc.repo.GetOrCreateServiceDaily(ctx, svc.ID, today)
-		if err != nil {
-			utils.Info("checker get/create daily failed for service %d: %v", svc.ID, err)
-			continue
+		if isDue {
+			dueTargets = append(dueTargets, probeTarget{svc: svc, task: task})
 		}
+	}
 
-		isUp := (status >= 200 && status < 400) || status == 1
+	// 清理已被删除服务的运行时状态，避免 states 无限增长
+	hc.mu.Lock()
+	for id := range hc.states {
+		if !alive[id] {
+			delete(hc.states, id)
+		}
+	}
+	hc.mu.Unlock()
+
+	if len(dueTargets) == 0 {
+		return
+	}
+
+	// 有界并发探测：串行探测会让一轮耗时随服务数量线性增长，
+	// 在多个服务同时故障（各自等满 10s 超时）时监控精度会明显下降。
+	sem := make(chan struct{}, maxProbeConcurrency)
+	var wg sync.WaitGroup
+	for _, t := range dueTargets {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(t probeTarget) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			hc.probeAndRecord(ctx, t.svc, t.task, inMaint)
+		}(t)
+	}
+	wg.Wait()
+}
+
+// probeAndRecord 执行一次探测并写入心跳与每日统计
+func (hc *HealthChecker) probeAndRecord(ctx context.Context, svc *model.Service, task *model.ProbeTask, inMaint map[int64]bool) {
+	status, latency, message := hc.performCheck(svc)
+
+	// Record heartbeat
+	hb := &model.Heartbeat{
+		ServiceID: svc.ID,
+		Status:    status,
+		Latency:   latency,
+		Message:   message,
+	}
+	if err := hc.repo.CreateHeartbeat(ctx, hb); err != nil {
+		utils.Info("checker create heartbeat failed for service %d: %v", svc.ID, err)
+	}
+
+	isUp := (status >= 200 && status < 400) || status == 1
+
+	// Update daily record
+	today := time.Now().Format("2006-01-02")
+	daily, err := hc.repo.GetOrCreateServiceDaily(ctx, svc.ID, today)
+	if err != nil {
+		utils.Info("checker get/create daily failed for service %d: %v", svc.ID, err)
+	} else {
 		if isUp {
 			daily.UptimeCount++
 		} else if !inMaint[svc.ID] {
@@ -197,10 +317,10 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		if err := hc.repo.UpdateServiceDaily(ctx, daily); err != nil {
 			utils.Info("checker update daily failed for service %d: %v", svc.ID, err)
 		}
-
-		// Auto-incident logic with probe task config
-		hc.trackProbeState(ctx, svc, task, isUp)
 	}
+
+	// Auto-incident logic with probe task config
+	hc.trackProbeState(ctx, svc, task, isUp)
 }
 
 func (hc *HealthChecker) trackProbeState(ctx context.Context, svc *model.Service, task *model.ProbeTask, isUp bool) {
@@ -328,6 +448,7 @@ func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service
 	hc.mu.Unlock()
 
 	utils.Info("checker resolved incident #%d for service %s", inc.ID, svc.Name)
+	hc.dataChanged()
 	notifyResolved(svc.Name)
 }
 
@@ -363,6 +484,7 @@ func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service,
 	hc.mu.Unlock()
 
 	utils.Info("checker auto-created incident #%d for service %s", inc.ID, svc.Name)
+	hc.dataChanged()
 	notifyAlert(svc.Name, svc.URL, now)
 
 	// Try auto-merge with same-server incidents (check server's auto_merge setting)
@@ -432,6 +554,7 @@ func (hc *HealthChecker) mergeIncidents(ctx context.Context, target, source *mod
 	hc.mu.Unlock()
 
 	utils.Info("checker merged incident #%d as child of #%d", source.ID, target.ID)
+	hc.dataChanged()
 }
 
 func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
@@ -442,6 +565,7 @@ func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
 	}
 
 	now := time.Now().UTC()
+	changed := false
 
 	for _, m := range maintenances {
 		if m.Status != "scheduled" && m.Status != "in_progress" {
@@ -457,6 +581,7 @@ func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
 				utils.Info("checker failed to update maintenance #%d to in_progress: %v", m.ID, err)
 			} else {
 				utils.Info("checker auto-updated maintenance #%d (%s) to in_progress", m.ID, m.Title)
+				changed = true
 			}
 		} else if m.Status == "in_progress" && !now.Before(end) {
 			m.Status = "completed"
@@ -464,8 +589,13 @@ func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
 				utils.Info("checker failed to update maintenance #%d to completed: %v", m.ID, err)
 			} else {
 				utils.Info("checker auto-updated maintenance #%d (%s) to completed", m.ID, m.Title)
+				changed = true
 			}
 		}
+	}
+
+	if changed {
+		hc.dataChanged()
 	}
 }
 
@@ -511,7 +641,7 @@ func (hc *HealthChecker) checkHTTP(svc *model.Service) (int, int, string) {
 	req.Close = true
 	req.Header.Set("User-Agent", "LumiPulse")
 
-	resp, err := hc.client.Do(req)
+	resp, err := hc.clientFor(svc).Do(req)
 	latency := int(time.Since(start).Milliseconds())
 	if err != nil {
 		return 0, latency, err.Error()
@@ -533,14 +663,17 @@ func (hc *HealthChecker) checkTCP(svc *model.Service) (int, int, string) {
 }
 
 func (hc *HealthChecker) cleanup(ctx context.Context) {
-	beforeDaily := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
+	dailyDays := config.GlobalConfig.DailyRetention()
+	heartbeatDays := config.GlobalConfig.HeartbeatRetention()
+
+	beforeDaily := time.Now().AddDate(0, 0, -dailyDays).Format("2006-01-02")
 	if err := hc.repo.DeleteOldServiceDailies(ctx, beforeDaily); err != nil {
 		utils.Info("checker cleanup dailies failed: %v", err)
 	} else {
-		utils.Info("checker cleaned up daily records older than 90 days")
+		utils.Info("checker cleaned up daily records older than %d days", dailyDays)
 	}
 
-	beforeHB := time.Now().AddDate(0, 0, -7).UTC().Format("2006-01-02T15:04:05Z")
+	beforeHB := time.Now().AddDate(0, 0, -heartbeatDays).UTC().Format("2006-01-02T15:04:05Z")
 	if err := hc.repo.DeleteOldHeartbeats(ctx, beforeHB); err != nil {
 		utils.Info("checker cleanup heartbeats failed: %v", err)
 	} else {

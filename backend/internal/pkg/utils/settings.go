@@ -19,6 +19,12 @@ const (
 var (
 	settingsDB   *sqlx.DB
 	settingsOnce sync.Once
+
+	// 设置项内存缓存：设置读取非常频繁（CORS 中间件每个请求都会读），
+	// 全部落库会带来大量无谓查询；写入时同步失效。
+	settingsMu    sync.RWMutex
+	settingsCache = make(map[string]string)
+	settingsReady bool
 )
 
 func InitSettingsDB(db *sqlx.DB) {
@@ -31,12 +37,53 @@ func GetSetting(key string) string {
 	if settingsDB == nil {
 		return ""
 	}
+
+	settingsMu.RLock()
+	if settingsReady {
+		v, ok := settingsCache[key]
+		settingsMu.RUnlock()
+		if ok {
+			return v
+		}
+		// 缓存已就绪但没有该键，说明确实为空，无需再查库
+		return ""
+	}
+	settingsMu.RUnlock()
+
+	return loadSettingFromDB(key)
+}
+
+// loadSettingFromDB 直接读库（仅用于缓存未就绪或主动回填）
+func loadSettingFromDB(key string) string {
 	var value string
-	err := settingsDB.Get(&value, "SELECT value FROM Settings WHERE key = ?", key)
-	if err != nil {
+	if err := settingsDB.Get(&value, "SELECT value FROM Settings WHERE key = ?", key); err != nil {
 		return ""
 	}
 	return value
+}
+
+// WarmupSettings 启动时把全部设置读进内存
+func WarmupSettings() {
+	if settingsDB == nil {
+		return
+	}
+
+	type row struct {
+		Key   string `db:"key"`
+		Value string `db:"value"`
+	}
+	var rows []row
+	if err := settingsDB.Select(&rows, "SELECT key, value FROM Settings"); err != nil {
+		return
+	}
+
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	settingsCache = make(map[string]string, len(rows))
+	for _, r := range rows {
+		settingsCache[r.Key] = r.Value
+	}
+	settingsReady = true
 }
 
 func SetSetting(key, value string) error {
@@ -48,7 +95,16 @@ func SetSetting(key, value string) error {
 		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
 		key, value,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	settingsMu.Lock()
+	if settingsReady {
+		settingsCache[key] = value
+	}
+	settingsMu.Unlock()
+	return nil
 }
 
 func GetAllSettings() map[string]string {
@@ -56,6 +112,16 @@ func GetAllSettings() map[string]string {
 	if settingsDB == nil {
 		return result
 	}
+
+	settingsMu.RLock()
+	if settingsReady {
+		for k, v := range settingsCache {
+			result[k] = v
+		}
+		settingsMu.RUnlock()
+		return result
+	}
+	settingsMu.RUnlock()
 
 	type row struct {
 		Key   string `db:"key"`
@@ -84,6 +150,10 @@ func CheckAdminCredentials(name, password string) bool {
 	if dbName != "" && dbPass != "" {
 		// bcrypt hash 检测
 		if len(dbPass) > 0 && dbPass[0] == '$' {
+			// 用户名同样必须匹配，否则任意用户名 + 正确密码都能登录
+			if name != dbName {
+				return false
+			}
 			err := bcrypt.CompareHashAndPassword([]byte(dbPass), []byte(password))
 			return err == nil
 		}

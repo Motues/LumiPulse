@@ -21,7 +21,7 @@ const services = ref<ServiceDetail[]>([])
 const loading = ref(true)
 const showForm = ref(false)
 const editing = ref<ServiceDetail | null>(null)
-const form = ref({ name: '', url: '', description: '', type: 'http', interval: 60, showOnHomepage: true })
+const form = ref({ name: '', url: '', description: '', type: 'http', interval: 60, showOnHomepage: true, insecureSkipVerify: false })
 const dragIndex = ref<number | null>(null)
 const searchQuery = ref('')
 
@@ -70,7 +70,7 @@ const { markClean: cleanSvc, handleClose: closeSvc, restoreFromStorage: restoreS
 
 function openCreate() {
   editing.value = null
-  const defaults = { name: '', url: '', description: '', type: 'http', interval: 60, showOnHomepage: true }
+  const defaults = { name: '', url: '', description: '', type: 'http', interval: 60, showOnHomepage: true, insecureSkipVerify: false }
   form.value = { ...defaults }
   restoreSvc()
   cleanSvc()
@@ -86,6 +86,7 @@ function openEdit(svc: ServiceDetail) {
     type: svc.type,
     interval: svc.interval,
     showOnHomepage: svc.showOnHomepage,
+    insecureSkipVerify: !!svc.insecureSkipVerify,
   }
   cleanSvc()
   showForm.value = true
@@ -312,6 +313,26 @@ watch(() => props.pendingServiceId, (id) => {
                 <span
                   class="bg-white rounded-full shadow transition-transform duration-200"
                   :class="form.showOnHomepage ? 'translate-x-[19px]' : 'translate-x-[3px]'"
+                  style="width: 16px; height: 16px;"
+                ></span>
+              </span>
+            </label>
+          </div>
+          <div class="flex items-center justify-between pt-2">
+            <div>
+              <div class="text-sm font-medium" style="color: var(--text-color);">跳过 HTTPS 证书校验</div>
+              <div class="text-xs mt-0.5" style="color: var(--text-color); opacity: 0.4;">仅对该服务生效，用于自签证书的内网地址</div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+              <input type="checkbox" v-model="form.insecureSkipVerify" class="sr-only" />
+              <span
+                class="flex items-center rounded-full transition-colors duration-200"
+                :class="form.insecureSkipVerify ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'"
+                style="width: 40px; height: 22px; flex-shrink: 0;"
+              >
+                <span
+                  class="bg-white rounded-full shadow transition-transform duration-200"
+                  :class="form.insecureSkipVerify ? 'translate-x-[19px]' : 'translate-x-[3px]'"
                   style="width: 16px; height: 16px;"
                 ></span>
               </span>

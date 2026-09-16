@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/utils"
 )
 
 func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error {
@@ -28,10 +29,14 @@ func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error
 	// Import services
 	for _, s := range data.Services {
 		s.ID = 0 // reset ID to auto-increment
-		query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		// 主键会被重置，公开标识缺失则重新生成
+		if s.PublicHash == "" {
+			s.PublicHash = utils.GeneratePublicHash()
+		}
+		query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, insecure_skip_verify, public_hash, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		res, err := tx.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
-			s.Status, s.IsActive, s.SortOrder, s.ShowOnHomepage, s.CreatedAt, s.UpdatedAt)
+			s.Status, s.IsActive, s.SortOrder, s.ShowOnHomepage, s.InsecureSkipVerify, s.PublicHash, s.CreatedAt, s.UpdatedAt)
 		if err != nil {
 			return err
 		}
@@ -47,10 +52,14 @@ func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error
 		parentRef := inc.ParentID // save before modifying
 		inc.ID = 0
 		inc.ParentID = nil
+		// 导入时主键会被重置，公开标识缺失则重新生成
+		if inc.PublicHash == "" {
+			inc.PublicHash = utils.GeneratePublicHash()
+		}
 
-		query := `INSERT INTO Incident (service_id, title, impact, status, affected_services, parent_id, resolved_at, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		res, err := tx.ExecContext(ctx, query, inc.ServiceID, inc.Title, inc.Impact, inc.Status,
+		query := `INSERT INTO Incident (public_hash, service_id, title, impact, status, affected_services, parent_id, resolved_at, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		res, err := tx.ExecContext(ctx, query, inc.PublicHash, inc.ServiceID, inc.Title, inc.Impact, inc.Status,
 			inc.AffectedServices, nil, inc.ResolvedAt, inc.CreatedAt, inc.UpdatedAt)
 		if err != nil {
 			return err

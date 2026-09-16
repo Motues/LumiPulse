@@ -16,8 +16,12 @@
 | `is_active` | INTEGER | DEFAULT 1 | 是否启用监控（1 为启用，0 为禁用） |
 | `sort_order` | INTEGER | DEFAULT 0 | 前端展示排序权重 |
 | `show_on_homepage` | INTEGER | DEFAULT 1 | 是否在首页展示（1 为展示，0 为隐藏） |
+| `insecure_skip_verify` | INTEGER | DEFAULT 0 | 仅对该服务跳过 HTTPS 证书校验（1 为跳过，用于自签证书的内网服务） |
+| `public_hash` | TEXT | UNIQUE, DEFAULT '' | 公开访问标识（32 位随机十六进制）。公开详情页用它替代自增 ID |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
+
+索引：`idx_service_public_hash(public_hash)`（唯一）
 
 ---
 
@@ -63,7 +67,8 @@
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID（仅内部 / 管理接口使用） |
+| `public_hash` | TEXT | UNIQUE, DEFAULT '' | 公开访问标识（32 位随机十六进制）。公开页面用它替代自增 ID，避免暴露主键与记录规模 |
 | `service_id` | INTEGER | NOT NULL REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
 | `title` | TEXT | NOT NULL | 事件标题 |
 | `impact` | TEXT | NOT NULL | 影响等级：`minor`, `major`, `critical` |
@@ -74,7 +79,7 @@
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 事件开始时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
-索引：`idx_incident_status(status)`、`idx_incident_service_status(service_id, status)`、`idx_incident_parent(parent_id)`
+索引：`idx_incident_status(status)`、`idx_incident_service_status(service_id, status)`、`idx_incident_parent(parent_id)`、`idx_incident_public_hash(public_hash)`（唯一）
 
 ---
 

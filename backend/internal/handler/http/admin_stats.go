@@ -8,16 +8,16 @@ import (
 )
 
 type DashboardStats struct {
-	TotalServices           int                   `json:"totalServices"`
-	OperationalCount        int                   `json:"operationalCount"`
-	DegradedCount           int                   `json:"degradedCount"`
-	OutageCount             int                   `json:"outageCount"`
-	ActiveIncidents         int                   `json:"activeIncidents"`
-	ActiveMaintenances      int                   `json:"activeMaintenances"`
+	TotalServices           int                    `json:"totalServices"`
+	OperationalCount        int                    `json:"operationalCount"`
+	DegradedCount           int                    `json:"degradedCount"`
+	OutageCount             int                    `json:"outageCount"`
+	ActiveIncidents         int                    `json:"activeIncidents"`
+	ActiveMaintenances      int                    `json:"activeMaintenances"`
 	Services                []model.ServiceSummary `json:"services"`
-	RecentIncidents         []*model.Incident     `json:"recentIncidents"`
-	RecentIncidentsTotal    int64                 `json:"recentIncidentsTotal"`
-	RecentIncidentsResolved int64                 `json:"recentIncidentsResolved"`
+	RecentIncidents         []*model.Incident      `json:"recentIncidents"`
+	RecentIncidentsTotal    int64                  `json:"recentIncidentsTotal"`
+	RecentIncidentsResolved int64                  `json:"recentIncidentsResolved"`
 }
 
 func (h *Handler) AdminStats(c *gin.Context) {
@@ -38,25 +38,8 @@ func (h *Handler) AdminStats(c *gin.Context) {
 	operational := 0
 	degraded := 0
 	outage := 0
-	summaries := make([]model.ServiceSummary, 0, total)
 
 	for _, svc := range services {
-		uptime := h.calcUptime(c, svc.ID, 90)
-		latency := 0
-		if hb, err := h.Repo.GetLatestHeartbeat(c.Request.Context(), svc.ID); err == nil {
-			latency = hb.Latency
-		}
-		summaries = append(summaries, model.ServiceSummary{
-			ID:       svc.ID,
-			Name:     svc.Name,
-			Status:   svc.Status,
-			URL:      svc.URL,
-			Type:     svc.Type,
-			Uptime:   uptime,
-			Latency:  latency,
-			Interval: svc.Interval,
-		})
-
 		switch svc.Status {
 		case "operational":
 			operational++
@@ -67,9 +50,30 @@ func (h *Handler) AdminStats(c *gin.Context) {
 		}
 	}
 
-	for i := range activeIncidents {
-		updates, _ := h.Repo.ListIncidentUpdates(c.Request.Context(), activeIncidents[i].ID)
-		activeIncidents[i].Updates = updates
+	// 复用统一的摘要组装逻辑（批量取在线率与最新延迟，避免 N+1）
+	statusMap := make(map[int64]string, len(services))
+	for _, svc := range services {
+		statusMap[svc.ID] = svc.Status
+	}
+	summaries := h.buildServiceSummaries(c, services, func(id int64) string {
+		return statusMap[id]
+	})
+
+	// 批量取各事件的进展更新
+	if len(activeIncidents) > 0 {
+		incIDs := make([]int64, len(activeIncidents))
+		for i, inc := range activeIncidents {
+			incIDs[i] = inc.ID
+		}
+		if updatesMap, err := h.Repo.BatchListIncidentUpdates(c.Request.Context(), incIDs); err == nil {
+			for _, inc := range activeIncidents {
+				updates := updatesMap[inc.ID]
+				if updates == nil {
+					updates = []*model.IncidentUpdate{}
+				}
+				inc.Updates = updates
+			}
+		}
 	}
 
 	// Only count non-monitoring incidents in the badge (monitoring = already resolved in practice)
@@ -84,11 +88,11 @@ func (h *Handler) AdminStats(c *gin.Context) {
 		Code:    200,
 		Message: "ok",
 		Data: DashboardStats{
-			TotalServices:      total,
-			OperationalCount:   operational,
-			DegradedCount:      degraded,
-			OutageCount:        outage,
-			ActiveIncidents:    significantCount,
+			TotalServices:           total,
+			OperationalCount:        operational,
+			DegradedCount:           degraded,
+			OutageCount:             outage,
+			ActiveIncidents:         significantCount,
 			ActiveMaintenances:      len(activeMaints),
 			Services:                summaries,
 			RecentIncidents:         activeIncidents,

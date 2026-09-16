@@ -36,6 +36,8 @@ func (h *Handler) CreateMaintenance(c *gin.Context) {
 		return
 	}
 
+	h.InvalidateSummary()
+
 	c.JSON(http.StatusCreated, model.APIResponse{
 		Code:    201,
 		Message: "Maintenance created",
@@ -89,6 +91,8 @@ func (h *Handler) UpdateMaintenance(c *gin.Context) {
 		return
 	}
 
+	h.InvalidateSummary()
+
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "Maintenance updated",
@@ -110,6 +114,8 @@ func (h *Handler) DeleteMaintenance(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to delete maintenance"})
 		return
 	}
+
+	h.InvalidateSummary()
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,

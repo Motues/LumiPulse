@@ -30,6 +30,22 @@
 }
 ```
 
+**通用约定**
+
+- `/api/*` 与 `/feed/*` 的响应在客户端声明 `Accept-Encoding: gzip` 时会自动 gzip 压缩，
+  并返回 `Content-Encoding: gzip` 与 `Vary: Accept-Encoding`。静态资源不在此列。
+- 未匹配的 `/api/*` 路径返回 JSON 格式的 `404`（`{"code":404,"message":"Not found"}`），
+  不会返回 SPA 的 `index.html`；其余未知路径返回 `index.html` 以支持前端路由。
+- `/assets/*` 为带内容哈希的构建产物，返回 `Cache-Control: public, max-age=31536000, immutable`；
+  SPA 入口与前端路由路径返回 `Cache-Control: no-cache`。
+- 公开总览（`/api/v1/summary`）有 25 秒缓存，但任何服务 / 事件 / 维护计划的写操作
+  （含检查器自动创建或解决事件、自动流转维护状态）都会立即让它失效。
+- 延迟与每日统计接口的 `days` 会被夹紧到 `HEARTBEAT_RETENTION_DAYS` /
+  `DAILY_RETENTION_DAYS`（见 `backend/README.md`），避免请求已被清理的时间范围却看不出原因。
+- **公开页面不出现自增 ID**：服务与事件的详情页 URL 分别是
+  `/services/:hash` 与 `/incidents/:hash`，均使用随机生成的 `publicHash`。
+  响应体中的 `id` / `serviceId` 仅用于前端与本地列表匹配，**不要用于拼接 URL**。
+
 ---
 
 ## 公共接口 (Public API)
@@ -168,6 +184,7 @@ GET /api/v1/summary
     "services": [
       {
         "id": 1,
+        "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
         "name": "API 服务",
         "status": "operational",
         "url": "https://api.example.com",
@@ -177,6 +194,7 @@ GET /api/v1/summary
     "activeIncidents": [
       {
         "id": 1,
+        "publicHash": "9f2c1d7ab34e56c8f01d2b7a45e9c310",
         "serviceId": 1,
         "title": "API 服务中断",
         "impact": "critical",
@@ -221,6 +239,7 @@ GET /api/v1/services
 ```
 
 获取所有监控服务的当前状态及在线率。状态同样经过 `reconcileStatus` 计算。
+仅包含在首页展示（`showOnHomepage`）的服务。
 
 **响应**
 
@@ -231,6 +250,7 @@ GET /api/v1/services
   "data": [
     {
       "id": 1,
+      "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
       "name": "API 服务",
       "status": "operational",
       "url": "https://api.example.com",
@@ -240,21 +260,30 @@ GET /api/v1/services
 }
 ```
 
+`id` 为数据库自增主键，**仅供前端与本地列表匹配，不得用于拼接 URL**；
+公开页面的服务详情请使用 `publicHash`。
+
 ---
 
 ### 获取服务历史
 
 ```
-GET /api/v1/services/:id/history?days=90
+GET /api/v1/services/:hash/history?days=90
 ```
 
-获取特定服务的历史可用性数据。
+通过 `publicHash` 获取特定服务的历史可用性数据。
+
+**路径参数**
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `hash` | string | 服务的 `publicHash`（不再接受自增 `id`） |
 
 **查询参数**
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `days` | int | 90 | 历史天数（如 30 或 90） |
+| `days` | int | 90 | 历史天数，上限为 `HEARTBEAT_RETENTION_DAYS`（默认 30） |
 
 **响应**
 
@@ -296,16 +325,18 @@ GET /api/v1/services/:id/history?days=90
 ### 获取服务延迟
 
 ```
-GET /api/v1/services/:id/latency?days=1
+GET /api/v1/services/:hash/latency?days=1
 ```
 
-获取服务延迟数据，返回按 5 分钟聚合的紧凑格式。前端可根据 `start` 和 `interval` 还原每个数据点的时间。
+通过 `publicHash` 获取服务延迟数据，返回按 5 分钟聚合的紧凑格式。前端可根据 `start` 和 `interval` 还原每个数据点的时间。
+
+聚合在 SQLite 内以 `GROUP BY` 完成，不会把窗口内的原始心跳读进内存。
 
 **查询参数**
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `days` | int | 1 | 天数（最大 30） |
+| `days` | int | 1 | 天数，上限为 `HEARTBEAT_RETENTION_DAYS`（默认 30，配置文件可调） |
 
 **响应**
 
@@ -333,21 +364,24 @@ GET /api/v1/services/:id/latency?days=1
 
 `statuses` 取值：`0`=正常、`1`=故障、`-1`=无数据
 
+> 失败判定：一次探测失败的条件是 **不满足** `200 ≤ status < 400` 或 `status = 1`（TCP 成功）。
+> 即 TCP 探测返回 `status = 0` 同样计入故障，与日志页口径一致。
+
 ---
 
 ### 获取服务每日统计
 
 ```
-GET /api/v1/services/:id/daily-stats?days=90
+GET /api/v1/services/:hash/daily-stats?days=90
 ```
 
-获取特定服务每天的健康检查汇总数据，用于前端矩阵展示。每个元素为 `[upCount, downCount, statusCode]` 三元组。
+通过 `publicHash` 获取特定服务每天的健康检查汇总数据，用于前端矩阵展示。每个元素为 `[upCount, downCount, statusCode]` 三元组。
 
 **查询参数**
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `days` | int | 90 | 天数（最大 365） |
+| `days` | int | 90 | 天数，上限为 `DAILY_RETENTION_DAYS`（默认 90，配置文件可调） |
 
 **响应**
 
@@ -357,6 +391,7 @@ GET /api/v1/services/:id/daily-stats?days=90
   "message": "ok",
   "data": {
     "serviceId": 1,
+    "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
     "days": [
       [48, 0, 0],
       [-1, -1, -1],
@@ -367,6 +402,49 @@ GET /api/v1/services/:id/daily-stats?days=90
 ```
 
 `statusCode` 取值：`-1`=无数据、`0`=正常、`1`=调查中、`2`=已确认、`3`=监控中、`4`=已解决
+
+---
+
+### 批量获取服务每日统计
+
+```
+GET /api/v1/daily-stats?days=90
+```
+
+一次性返回**所有首页可见服务**的每日统计。首页需要为每个服务渲染状态矩阵，
+逐个服务调用上面的接口会产生 N 次串行往返，本接口把它压缩成 1 次请求。
+
+**查询参数**
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `days` | int | 90 | 天数，上限为 `DAILY_RETENTION_DAYS`（默认 90） |
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "days": 90,
+    "services": [
+      {
+        "serviceId": 1,
+        "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
+        "days": [
+          [48, 0, 0],
+          [-1, -1, -1],
+          [46, 2, 1]
+        ]
+      }
+    ]
+  }
+}
+```
+
+`serviceId` 为服务的自增 ID（仅用于前端匹配本地服务列表，不作为 URL 使用），
+`publicHash` 为可安全用于 URL 的公开标识，`days` 数组格式与单服务接口完全一致。
 
 ---
 
@@ -395,6 +473,7 @@ GET /api/v1/incidents?page=1&limit=20
     "incidents": [
       {
         "id": 1,
+        "publicHash": "9f2c1d7ab34e56c8f01d2b7a45e9c310",
         "serviceId": 1,
         "title": "API 服务中断",
         "impact": "critical",
@@ -440,6 +519,48 @@ GET /api/v1/incidents?page=1&limit=20
 `status` 取值：`investigating`（调查中）、`identified`（已确认）、`monitoring`（监控中）、`resolved`（已解决）
 
 `resolvedAt`：事件首次标记为已解决的时间（RFC3339 格式），仅当 `status` 为 `resolved` 时存在。编辑事件不会改变此值。旧数据可能不包含此字段。
+
+`publicHash`：事件的公开访问标识（32 位随机十六进制）。**公开页面必须使用该值而不是自增 `id`**，以避免对外暴露数据库主键与记录规模。
+
+---
+
+### 获取故障事件详情
+
+```
+GET /api/v1/incidents/:hash
+```
+
+通过 `publicHash` 获取单个故障事件的详情（含对外的更新时间线，内部备注不会返回）。
+
+**路径参数**
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `hash` | string | 事件的 `publicHash`（不再接受自增 `id`） |
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "publicHash": "9f2c1d7ab34e56c8f01d2b7a45e9c310",
+    "serviceId": 1,
+    "title": "API 服务中断",
+    "impact": "critical",
+    "status": "resolved",
+    "affectedServices": "1",
+    "resolvedAt": "2026-05-08T18:45:00Z",
+    "createdAt": "2026-05-08T18:00:00Z",
+    "updatedAt": "2026-05-08T18:45:00Z",
+    "updates": []
+  }
+}
+```
+
+`hash` 不存在时返回 `404`。
 
 ---
 
@@ -588,6 +709,38 @@ GET /api/v1/admin/stats
 ```
 
 注：`activeIncidents` 计数已排除 `monitoring` 状态的事件（仅统计 `investigating` 和 `identified`）。
+
+---
+
+### 批量获取服务每日统计（管理用）
+
+```
+GET /api/v1/admin/daily-stats?days=90
+```
+
+与公开接口 `GET /api/v1/daily-stats` 格式一致，但**包含未在首页展示的服务**。
+管理端首页需要为每个服务渲染状态矩阵，逐个服务请求会产生 N 次串行往返。
+
+**查询参数**
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `days` | int | 90 | 天数，上限为 `DAILY_RETENTION_DAYS`（默认 90） |
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "days": 90,
+    "services": [
+      { "serviceId": 1, "days": [[48, 0, 0], [-1, -1, -1]] }
+    ]
+  }
+}
+```
 
 ---
 
@@ -784,11 +937,19 @@ POST /api/v1/admin/services
   "url": "https://api.example.com/health",
   "type": "http",
   "interval": 60,
-  "sortOrder": 0
+  "sortOrder": 0,
+  "showOnHomepage": true,
+  "insecureSkipVerify": false
 }
 ```
 
 `type` 取值：`http`（默认）、`tcp`、`ping`
+
+| 字段 | 说明 |
+| --- | --- |
+| `interval` | 探测间隔（秒），取值范围 **10 ~ 3600**，默认 60。检查器按该值调度，不再是固定 1 分钟 |
+| `showOnHomepage` | 是否在公开状态页展示 |
+| `insecureSkipVerify` | 仅对该服务跳过 HTTPS 证书校验（默认 `false`），用于自签证书的内网服务。优先使用它，而不是全局的 `INSECURE_SKIP_VERIFY` |
 
 **响应** (201)
 
@@ -806,6 +967,8 @@ POST /api/v1/admin/services
     "status": "operational",
     "isActive": true,
     "sortOrder": 0,
+    "showOnHomepage": true,
+    "insecureSkipVerify": false,
     "createdAt": "2026-05-09T00:00:00Z",
     "updatedAt": "2026-05-09T00:00:00Z"
   }
@@ -938,7 +1101,7 @@ POST /api/v1/admin/incidents
 GET /api/v1/admin/incidents?page=1&limit=20
 ```
 
-同公共接口 `/api/v1/incidents`，返回格式一致。
+同公共接口 `/api/v1/incidents`，返回格式一致。事件对象同时包含 `publicHash`，可用于拼接公开详情页地址。
 
 #### 获取事件详情（管理用）
 
@@ -946,7 +1109,7 @@ GET /api/v1/admin/incidents?page=1&limit=20
 GET /api/v1/admin/incidents/:id
 ```
 
-返回指定事件的完整信息，包含所有进展更新（含内部记录）和子事件列表。
+返回指定事件的完整信息，包含所有进展更新（含内部记录）和子事件列表。管理接口仍使用自增 `id`；公开页面请改用 `/api/v1/incidents/:hash`。
 
 **响应**
 
@@ -956,6 +1119,7 @@ GET /api/v1/admin/incidents/:id
   "message": "ok",
   "data": {
     "id": 1,
+    "publicHash": "9f2c1d7ab34e56c8f01d2b7a45e9c310",
     "serviceId": 1,
     "title": "API 服务中断",
     "impact": "critical",
@@ -1109,6 +1273,10 @@ POST /api/v1/admin/incidents/:id/split
 ---
 
 ### 维护计划管理
+
+`scheduledStart` / `scheduledEnd` 均为带时区的 RFC3339 时间字符串（例如 `2026-05-15T02:00:00+08:00`）。
+更新计划时若某个时间字段传空字符串，则保留数据库中的原值；前端 `datetime-local` 输入框只接受
+`YYYY-MM-DDTHH:mm` 形式，因此编辑回填时需先把存储值转换成该形式，避免时间被清空或写成非法值。
 
 #### 获取维护计划列表（管理用）
 

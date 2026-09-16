@@ -33,6 +33,9 @@ var TokenStore = struct {
 	Map map[string]time.Time // key: token, value: expiration time
 }{Map: make(map[string]time.Time)}
 
+// sessionIdleTimeout 会话空闲超时：每次使用会顺延（滑动续期）
+const sessionIdleTimeout = 20 * time.Minute
+
 // GetClientIP 获取真实 IP
 func GetClientIP(c *gin.Context) string {
 	// 优先级：Cloudflare -> X-Real-IP -> X-Forwarded-For -> RemoteAddr
@@ -91,8 +94,8 @@ func GenerateTempKey(name string) string {
 	rand.Read(b)
 	token := fmt.Sprintf("%x", b)
 
-	// 设置 20 分钟过期时间
-	expiration := time.Now().Add(20 * time.Minute)
+	// 设置空闲过期时间，使用时会滑动续期
+	expiration := time.Now().Add(sessionIdleTimeout)
 
 	TokenStore.Lock()
 	TokenStore.Map[token] = expiration
@@ -101,7 +104,8 @@ func GenerateTempKey(name string) string {
 	return token
 }
 
-// IsTokenValid 验证密钥有效性
+// IsTokenValid 验证密钥有效性；有效时顺延过期时间（滑动续期）。
+// 这样管理员持续操作期间不会被中途踢出，而空闲超时仍然生效。
 func IsTokenValid(token string) bool {
 	TokenStore.Lock()
 	defer TokenStore.Unlock()
@@ -117,5 +121,30 @@ func IsTokenValid(token string) bool {
 		return false
 	}
 
+	// 滑动续期
+	TokenStore.Map[token] = time.Now().Add(sessionIdleTimeout)
 	return true
+}
+
+// CleanupExpiredTokens 清理已过期的会话，避免 TokenStore 无限增长
+func CleanupExpiredTokens() int {
+	now := time.Now()
+	removed := 0
+
+	TokenStore.Lock()
+	defer TokenStore.Unlock()
+	for token, expiration := range TokenStore.Map {
+		if now.After(expiration) {
+			delete(TokenStore.Map, token)
+			removed++
+		}
+	}
+	return removed
+}
+
+// RevokeToken 主动注销会话
+func RevokeToken(token string) {
+	TokenStore.Lock()
+	delete(TokenStore.Map, token)
+	TokenStore.Unlock()
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { SummaryResponse, Incident, ServiceSummary } from '../api/types'
 import ServiceMatrix from '../components/ServiceMatrix.vue'
@@ -8,6 +8,7 @@ import PublicServiceDetail from '../components/PublicServiceDetail.vue'
 import { siteName, siteIcon, emailEnabled, showAdminButton, customFooter, subEnabledAny, subEnableEmail, subEnableRss, subEnableAtom } from '../composables/useSiteConfig'
 import { useDarkMode } from '../composables/useDarkMode'
 
+const route = useRoute()
 const router = useRouter()
 
 const { isDark, themeMode, setMode } = useDarkMode()
@@ -147,7 +148,32 @@ function openUrl(url: string) {
 const dailyStats = ref<Map<number, [number, number, number][]>>(new Map())
 const isMobile = ref(false)
 const hoveredSvcId = ref<number | null>(null)
-const selectedService = ref<ServiceSummary | null>(null)
+
+// 当前路由中的服务 hash（/services/:hash），用于支持可分享的详情链接
+const selectedHash = computed(() =>
+  route.name === 'service-detail' ? String(route.params.hash || '') : ''
+)
+// 直接从已加载的总览里派生选中的服务：自动跟随 30s 自动刷新，且不需要额外请求
+const selectedService = computed<ServiceSummary | null>(() => {
+  if (!selectedHash.value || !summary.value) return null
+  return summary.value.services.find(s => s.publicHash === selectedHash.value) || null
+})
+// 已经加载完成但 hash 对应不上任何可见服务
+const serviceNotFound = computed(() =>
+  !!selectedHash.value && !loading.value && !selectedService.value
+)
+// 是否处于详情视图（/services/:hash）。详情页保持聚焦，
+// 「维护计划」「过去事件」只在首页列表展示，不在详情页出现。
+const isDetailView = computed(() => !!selectedHash.value)
+
+function openService(svc: ServiceSummary) {
+  if (!svc.publicHash) return
+  router.push(`/services/${svc.publicHash}`)
+}
+
+function closeService() {
+  router.push('/')
+}
 
 function getServiceDays(serviceId: number): [number, number, number][] {
   return dailyStats.value.get(serviceId) || []
@@ -181,13 +207,25 @@ const incidentsByDate = computed(() => {
 async function loadDailyStats() {
   if (!summary.value) return
   const days = isMobile.value ? 30 : 90
-  for (const svc of summary.value.services) {
-    try {
-      const res = await api.getServiceDailyStats(svc.id, days)
-      dailyStats.value.set(svc.id, res.data.days)
-    } catch {
-      dailyStats.value.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+  try {
+    // 一次批量请求取回所有服务的矩阵数据（原先按服务逐个 await，N 个服务 = N 次串行往返）
+    const res = await api.getBatchDailyStats(days)
+    const map = new Map<number, [number, number, number][]>()
+    for (const item of res.data.services) {
+      map.set(item.serviceId, item.days)
     }
+    for (const svc of summary.value.services) {
+      if (!map.has(svc.id)) {
+        map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+      }
+    }
+    dailyStats.value = map
+  } catch {
+    const map = new Map<number, [number, number, number][]>()
+    for (const svc of summary.value.services) {
+      map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+    }
+    dailyStats.value = map
   }
 }
 
@@ -325,8 +363,8 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- Maintenance Plans (if any) -->
-      <section v-if="summary.maintenances && summary.maintenances.length > 0" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
+      <!-- Maintenance Plans (if any) — 仅首页展示，详情页不出现 -->
+      <section v-if="!isDetailView && summary.maintenances && summary.maintenances.length > 0" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
         <div>
           <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">维护计划</h3>
           <div v-for="m in summary.maintenances" :key="m.id" class="mb-3 last:mb-0 pb-3 last:pb-0">
@@ -344,8 +382,14 @@ onUnmounted(() => {
         v-if="selectedService"
         :service="selectedService"
         :daily-days="getServiceDays(selectedService.id)"
-        @back="selectedService = null"
+        @back="closeService"
       />
+
+      <!-- 分享链接失效：hash 对应不上任何首页可见的服务 -->
+      <section v-else-if="serviceNotFound" class="rounded-lg p-8 mb-8 text-center" style="border: 1px solid var(--button-border-color);">
+        <p class="text-sm mb-3" style="color: var(--text-color); opacity: 0.6;">未找到该服务，可能已被删除或不再在首页展示。</p>
+        <button @click="closeService" class="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:opacity-80 transition-opacity">返回状态页</button>
+      </section>
 
       <!-- Service Status -->
       <section v-else class="rounded-lg mb-8 pb-4" style="border: 1px solid var(--button-border-color);">
@@ -360,7 +404,11 @@ onUnmounted(() => {
           >
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center">
-                <span class="font-bold leading-none hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors" style="color: var(--text-color);">{{ svc.name }}</span>
+                <span
+                  class="font-bold leading-none cursor-pointer text-[color:var(--text-color)] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                  title="查看服务详情"
+                  @click="openService(svc)"
+                >{{ svc.name }}</span>
                 <span
                   v-if="svc.url"
                   class="relative inline-flex items-center ml-1"
@@ -368,8 +416,7 @@ onUnmounted(() => {
                   @mouseleave="hoveredSvcId = null"
                 >
                   <svg
-                    class="w-4 h-4 cursor-pointer transition-colors hover:text-emerald-500 dark:hover:text-emerald-400"
-                    style="color: var(--text-color); opacity: 0.4;"
+                    class="w-4 h-4 cursor-pointer transition-colors text-[color:var(--text-color)] opacity-40 hover:text-emerald-500 dark:hover:text-emerald-400"
                     fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"
                     @click.stop="openUrl(svc.url)"
                   >
@@ -401,10 +448,10 @@ onUnmounted(() => {
         </template>
       </section>
 
-      <!-- Past Incidents -->
-      <section v-if="incidents.length > 0" class="mb-8">
+      <!-- Past Incidents — 仅首页展示，详情页不出现 -->
+      <section v-if="!isDetailView && incidents.length > 0" class="mb-8">
         <h2 class="text-lg font-bold mb-4" style="color: var(--text-color);">过去事件</h2>
-        <div v-for="inc in incidents" :key="inc.id" class="rounded-lg p-6 mb-4 cursor-pointer hover:border-emerald-500/30 dark:hover:border-emerald-400/30 transition-colors" style="border: 1px solid var(--button-border-color);" @click="router.push(`/incidents/${inc.id}`)">
+        <div v-for="inc in incidents" :key="inc.publicHash" class="rounded-lg p-6 mb-4 cursor-pointer border border-[color:var(--button-border-color)] hover:border-emerald-500/30 dark:hover:border-emerald-400/30 transition-colors" @click="router.push(`/incidents/${inc.publicHash}`)">
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div class="flex items-center gap-2">
               <h3 class="text-base font-bold" :class="{
@@ -426,8 +473,8 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- No Maintenance -->
-      <section v-if="!summary.maintenances || summary.maintenances.length === 0" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
+      <!-- No Maintenance — 仅首页展示，详情页不出现 -->
+      <section v-if="!isDetailView && (!summary.maintenances || summary.maintenances.length === 0)" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
         <div>
           <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">维护计划</h3>
           <p class="text-sm mb-1" style="color: var(--text-color);">暂无计划的维护</p>
@@ -487,7 +534,7 @@ onUnmounted(() => {
 
             <!-- Service selection toggle -->
             <div v-if="servicesList.length > 0">
-              <button @click="showServiceSelect = !showServiceSelect" type="button" class="text-xs flex items-center gap-1 transition-colors hover:opacity-80" style="color: var(--text-color); opacity: 0.5;">
+              <button @click="showServiceSelect = !showServiceSelect" type="button" class="text-xs flex items-center gap-1 transition-colors text-[color:var(--text-color)] opacity-50 hover:opacity-80">
                 <svg class="w-3.5 h-3.5" :class="showServiceSelect ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
                 {{ showServiceSelect ? '收起' : '选择特定服务' }}
               </button>
