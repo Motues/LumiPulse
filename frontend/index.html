@@ -4,7 +4,43 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/assets/logo.svg" />
+
+    <!-- 分享预览元信息。站点名/描述取自运行时 /site-config，
+         静态文案只作为爬虫兜底（不执行 JS 的爬虫只能看到这里的默认值）。 -->
     <title>LumiPulse - 系统状态</title>
+    <meta name="description" content="LumiPulse 服务监控系统 —— 实时展示服务可用性、SLA 历史与运维公告。" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="LumiPulse" />
+    <meta property="og:title" content="LumiPulse - 系统状态" />
+    <meta property="og:description" content="LumiPulse 服务监控系统 —— 实时展示服务可用性、SLA 历史与运维公告。" />
+    <meta property="og:image" content="/assets/logo.svg" />
+    <meta property="og:url" content="/" />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="LumiPulse - 系统状态" />
+    <meta name="twitter:description" content="LumiPulse 服务监控系统 —— 实时展示服务可用性、SLA 历史与运维公告。" />
+    <meta name="twitter:image" content="/assets/logo.svg" />
+
+    <!-- 首屏主题：在样式表/框架挂载前套用深色模式，避免深色用户先看到一瞬白屏。
+         取值逻辑必须与 useDarkMode.ts 保持一致（键名、旧布尔值兼容）。 -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('lumipulse-theme-mode')
+          var dark =
+            saved === 'dark' ||
+            saved === 'true' ||
+            ((saved === 'system' || saved === null) &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {
+          /* localStorage 被禁用时按浅色渲染 */
+        }
+      })()
+    </script>
   </head>
   <body class="antialiased">
     <div id="app"></div>

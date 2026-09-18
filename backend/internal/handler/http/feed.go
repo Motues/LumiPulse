@@ -3,6 +3,7 @@ package http
 import (
 	"fmt"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/i18n"
 	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strings"
@@ -91,19 +92,20 @@ func parseFeedTime(s string) (time.Time, bool) {
 }
 
 func (h *Handler) buildRSS(baseURL, siteName string, incidents []*model.Incident, updatesMap map[int64][]*model.IncidentUpdate, now string) string {
+	lang := i18n.Current()
 	var items strings.Builder
 	for _, inc := range incidents {
 		title := inc.Title
-		st := statusText(inc.Status)
-		desc := fmt.Sprintf("<p><strong>状态:</strong> %s</p><p><strong>影响:</strong> %s</p>",
-			st, impactTextCN(inc.Impact))
+		st := lang.StatusText(inc.Status)
+		desc := fmt.Sprintf("<p><strong>%s:</strong> %s</p><p><strong>%s:</strong> %s</p>",
+			lang.FeedStatusLabel(), st, lang.FeedImpactLabel(), lang.ImpactText(inc.Impact))
 
 		if updates, ok := updatesMap[inc.ID]; ok && len(updates) > 0 {
 			desc += "<ul>"
 			for _, u := range updates {
 				if !u.IsInternal {
 					desc += fmt.Sprintf("<li><em>%s</em> - %s</li>",
-						st, escapeXML(u.Content))
+						lang.StatusText(u.Status), escapeXML(u.Content))
 				}
 			}
 			desc += "</ul>"
@@ -130,32 +132,34 @@ func (h *Handler) buildRSS(baseURL, siteName string, incidents []*model.Incident
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>%s - 状态更新</title>
+    <title>%s</title>
     <link>%s</link>
-    <description>%s 系统状态与故障事件更新</description>
-    <language>zh-CN</language>
+    <description>%s</description>
+    <language>%s</language>
     <lastBuildDate>%s</lastBuildDate>
     <atom:link href="%s/feed/rss" rel="self" type="application/rss+xml"/>
 %s  </channel>
-</rss>`, siteName, baseURL, siteName, now, baseURL, items.String())
+</rss>`, escapeXML(lang.FeedTitle(siteName)), baseURL, escapeXML(lang.FeedDescription(siteName)),
+		lang.HTMLLang(), now, baseURL, items.String())
 }
 
 func (h *Handler) buildAtom(baseURL, siteName string, incidents []*model.Incident, updatesMap map[int64][]*model.IncidentUpdate, now string) string {
+	lang := i18n.Current()
 	host := hostWithoutPort(strings.TrimPrefix(baseURL, "http://"))
 	host = strings.TrimPrefix(host, "https://")
 	var entries strings.Builder
 	for _, inc := range incidents {
 		title := inc.Title
-		st := statusText(inc.Status)
-		content := fmt.Sprintf("<p><strong>状态:</strong> %s</p><p><strong>影响:</strong> %s</p>",
-			st, impactTextCN(inc.Impact))
+		st := lang.StatusText(inc.Status)
+		content := fmt.Sprintf("<p><strong>%s:</strong> %s</p><p><strong>%s:</strong> %s</p>",
+			lang.FeedStatusLabel(), st, lang.FeedImpactLabel(), lang.ImpactText(inc.Impact))
 
 		if updates, ok := updatesMap[inc.ID]; ok && len(updates) > 0 {
 			content += "<ul>"
 			for _, u := range updates {
 				if !u.IsInternal {
 					content += fmt.Sprintf("<li><em>%s</em> - %s</li>",
-						st, escapeXML(u.Content))
+						lang.StatusText(u.Status), escapeXML(u.Content))
 				}
 			}
 			content += "</ul>"
@@ -186,42 +190,15 @@ func (h *Handler) buildAtom(baseURL, siteName string, incidents []*model.Inciden
 	}
 
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>%s - 状态更新</title>
-  <subtitle>%s 系统状态与故障事件更新</subtitle>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="%s">
+  <title>%s</title>
+  <subtitle>%s</subtitle>
   <link href="%s" rel="alternate" type="text/html"/>
   <link href="%s/feed/atom" rel="self" type="application/atom+xml"/>
   <id>%s/</id>
   <updated>%s</updated>
-%s</feed>`, siteName, siteName, baseURL, baseURL, baseURL, now, entries.String())
-}
-
-func statusText(s string) string {
-	switch s {
-	case "investigating":
-		return "调查中"
-	case "identified":
-		return "已确认"
-	case "monitoring":
-		return "监控中"
-	case "resolved":
-		return "已解决"
-	default:
-		return s
-	}
-}
-
-func impactTextCN(s string) string {
-	switch s {
-	case "minor":
-		return "轻微"
-	case "major":
-		return "重大"
-	case "critical":
-		return "严重"
-	default:
-		return s
-	}
+%s</feed>`, lang.HTMLLang(), escapeXML(lang.FeedTitle(siteName)), escapeXML(lang.FeedDescription(siteName)),
+		baseURL, baseURL, baseURL, now, entries.String())
 }
 
 func escapeXML(s string) string {

@@ -31,6 +31,10 @@ INSECURE_SKIP_VERIFY: false
 HEARTBEAT_RETENTION_DAYS: 30
 # 每日汇总数据保留天数，同时是每日统计接口 days 参数的上限（默认 90）
 DAILY_RETENTION_DAYS: 90
+# 服务端生成内容（RSS / Atom 订阅源、告警邮件、月度 SLA 报告邮件、检查器
+# 自动创建的事件与进展文案）的语言：zh-CN（默认）或 en-US。
+# 前端界面语言由浏览器决定，不受该项影响。
+LANG: zh-CN
 ```
 
 可通过 `PORT` 环境变量覆盖端口。

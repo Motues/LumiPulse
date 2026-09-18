@@ -14,8 +14,9 @@ import NotificationManager from '../components/dashboard/NotificationManager.vue
 import ApiKeyManager from '../components/dashboard/ApiKeyManager.vue'
 import SubscriberManager from '../components/dashboard/SubscriberManager.vue'
 import ProbeManager from '../components/dashboard/ProbeManager.vue'
+import SLAReport from '../components/dashboard/SLAReport.vue'
 
-type Section = 'dashboard' | 'services' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'users' | 'subscribers' | 'notifications' | 'settings' | 'api-keys'
+type Section = 'dashboard' | 'services' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'sla' | 'users' | 'subscribers' | 'notifications' | 'settings' | 'api-keys'
 const activeSection = ref<Section>('dashboard')
 const pendingServiceId = ref<number | undefined>()
 const sidebarCollapsed = ref(false)
@@ -51,6 +52,7 @@ const navGroups = [
       { id: 'services' as Section, label: '服务管理', icon: 'M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z M8 3v18' },
       { id: 'probes' as Section, label: '探测任务', icon: 'M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z M12 6a6 6 0 016 6 6 6 0 01-6 6 6 6 0 01-6-6 6 6 0 016-6z' },
       { id: 'logs' as Section, label: '监控日志', icon: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8' },
+      { id: 'sla' as Section, label: 'SLA 报告', icon: 'M9 17V9m4 8V5m4 12v-5M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z' },
     ],
   },
   {
@@ -127,6 +129,8 @@ function switchSection(s: string, serviceId?: number) {
         <ProbeManager v-else-if="activeSection === 'probes'" />
 
         <LogViewer v-else-if="activeSection === 'logs'" />
+
+        <SLAReport v-else-if="activeSection === 'sla'" />
 
         <UserManager v-else-if="activeSection === 'users'" />
 

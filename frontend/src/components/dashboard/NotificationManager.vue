@@ -16,6 +16,36 @@ const testing = ref(false)
 // Test email
 const testTo = ref('')
 
+// Webhook
+const testingWebhook = ref(false)
+
+const webhookTypes: { key: string; label: string; hint: string; placeholder: string }[] = [
+  { key: 'generic', label: '通用 Webhook', hint: 'JSON POST，支持 HMAC-SHA256 签名', placeholder: 'https://example.com/hooks/lumipulse' },
+  { key: 'slack', label: 'Slack', hint: 'Incoming Webhook 地址，使用 attachments 渲染', placeholder: 'https://hooks.slack.com/services/...' },
+  { key: 'discord', label: 'Discord', hint: '频道 Webhook 地址，使用 embeds 渲染', placeholder: 'https://discord.com/api/webhooks/...' },
+  { key: 'telegram', label: 'Telegram', hint: 'Bot API 地址，需在下方填写 chat_id', placeholder: 'https://api.telegram.org/bot<token>/sendMessage' },
+]
+
+const webhookTypeHint = computed(
+  () => webhookTypes.find(t => t.key === (settings.value['webhook_type'] || 'generic'))?.hint || '',
+)
+const webhookTypePlaceholder = computed(
+  () => webhookTypes.find(t => t.key === (settings.value['webhook_type'] || 'generic'))?.placeholder || '',
+)
+
+/** webhook_events 以逗号分隔存储；空值在后端视为「两种事件都订阅」 */
+const webhookEvents = computed<string[]>({
+  get: () => (settings.value['webhook_events'] || 'down,up').split(',').filter(Boolean),
+  set: (val: string[]) => { settings.value['webhook_events'] = val.join(',') },
+})
+
+function toggleWebhookEvent(event: string) {
+  const current = webhookEvents.value
+  webhookEvents.value = current.includes(event)
+    ? current.filter(e => e !== event)
+    : [...current, event]
+}
+
 // Service notification select
 const notifyServiceIds = ref<number[]>([])
 const serviceSearch = ref('')
@@ -93,6 +123,18 @@ async function testEmail() {
     toast(e.message || '发送失败')
   } finally {
     testing.value = false
+  }
+}
+
+async function testWebhook() {
+  testingWebhook.value = true
+  try {
+    await api.testWebhook()
+    toast('测试 webhook 发送成功', 'success')
+  } catch (e: any) {
+    toast(e.message || '发送失败')
+  } finally {
+    testingWebhook.value = false
   }
 }
 
@@ -218,7 +260,7 @@ onMounted(load)
       </div>
 
       <!-- Test Email -->
-      <div class="rounded-xl p-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+      <div class="rounded-xl p-6 mb-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
         <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">测试邮件发送</h3>
         <p class="text-sm mb-4" style="color: var(--text-color); opacity: 0.5;">向指定地址发送一封测试邮件，验证 SMTP 配置是否有效。</p>
         <div class="flex items-end gap-3 max-w-md">
@@ -233,6 +275,174 @@ onMounted(load)
             :style="(!testTo || testing) ? { opacity: 0.3 } : {}"
           >
             {{ testing ? '发送中...' : '发送测试' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Webhook Config -->
+      <div class="rounded-xl p-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">Webhook 通知</h3>
+        <p class="text-sm mb-4" style="color: var(--text-color); opacity: 0.5;">
+          除邮件外，可同时把服务异常 / 恢复事件推送到 Slack、Discord、Telegram 或自建接口。
+        </p>
+
+        <div class="space-y-4 max-w-md">
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">启用 Webhook</label>
+            <button
+              type="button"
+              @click="settings['webhook_enabled'] = settings['webhook_enabled'] === 'true' ? 'false' : 'true'"
+              class="relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 transition-colors"
+              :class="settings['webhook_enabled'] === 'true' ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'"
+            >
+              <span
+                class="inline-block h-4 w-4 transform rounded-full bg-white transition"
+                :class="settings['webhook_enabled'] === 'true' ? 'translate-x-[22px]' : 'translate-x-[3px]'"
+              />
+            </button>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">渠道类型</label>
+            <CustomSelect
+              v-model="settings['webhook_type']"
+              :options="webhookTypes.map(t => ({ label: t.label, value: t.key }))"
+            />
+            <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">{{ webhookTypeHint }}</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">Webhook 地址</label>
+            <input
+              v-model="settings['webhook_url']"
+              type="text"
+              :placeholder="webhookTypePlaceholder"
+              class="w-full px-3 py-2 rounded-lg text-sm input-field"
+            />
+          </div>
+
+          <div v-if="(settings['webhook_type'] || 'generic') === 'telegram'">
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">Telegram chat_id</label>
+            <input
+              v-model="settings['webhook_telegram_chat_id']"
+              type="text"
+              placeholder="-1001234567890"
+              class="w-full px-3 py-2 rounded-lg text-sm input-field"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">通知事件</label>
+            <div class="flex items-center gap-4 text-sm" style="color: var(--text-color);">
+              <label class="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="webhookEvents.includes('down')"
+                  @change="toggleWebhookEvent('down')"
+                  class="accent-emerald-500"
+                />
+                服务异常
+              </label>
+              <label class="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="webhookEvents.includes('up')"
+                  @change="toggleWebhookEvent('up')"
+                  class="accent-emerald-500"
+                />
+                服务恢复
+              </label>
+            </div>
+          </div>
+
+          <div v-if="(settings['webhook_type'] || 'generic') === 'generic'">
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">签名密钥（可选）</label>
+            <p class="text-xs mb-1" style="color: var(--text-color); opacity: 0.4;">
+              填写后请求会带 X-LumiPulse-Signature 头，值为 HMAC-SHA256(密钥, 时间戳 + "." + 请求体)。
+            </p>
+            <input
+              v-model="settings['webhook_secret']"
+              type="password"
+              placeholder="留空则不签名"
+              class="w-full px-3 py-2 rounded-lg text-sm input-field"
+            />
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button
+              @click="save"
+              :disabled="saving"
+              class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              :style="saving ? { opacity: 0.3 } : {}"
+            >
+              {{ saving ? '保存中...' : '保存配置' }}
+            </button>
+            <button
+              @click="testWebhook"
+              :disabled="testingWebhook"
+              class="px-6 py-2 bg-blue-500 hover:bg-blue-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              :style="testingWebhook ? { opacity: 0.3 } : {}"
+            >
+              {{ testingWebhook ? '发送中...' : '发送测试' }}
+            </button>
+          </div>
+          <p class="text-xs" style="color: var(--text-color); opacity: 0.4;">测试会使用已保存的配置，请先保存再测试。</p>
+        </div>
+      </div>
+
+      <!-- Monthly SLA Report Email -->
+      <div class="rounded-xl p-6 mt-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">月度 SLA 报告邮件</h3>
+        <p class="text-sm mb-4" style="color: var(--text-color); opacity: 0.5;">
+          每月自动把上一个自然月的可用率汇总发送给指定邮箱。报告内容可在「SLA 报告」页查看。
+        </p>
+
+        <div class="space-y-4 max-w-md">
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">启用月报邮件</label>
+            <button
+              type="button"
+              @click="settings['sla_report_enabled'] = settings['sla_report_enabled'] === 'true' ? 'false' : 'true'"
+              class="relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 transition-colors"
+              :class="settings['sla_report_enabled'] === 'true' ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'"
+            >
+              <span
+                class="inline-block h-4 w-4 transform rounded-full bg-white transition"
+                :class="settings['sla_report_enabled'] === 'true' ? 'translate-x-[22px]' : 'translate-x-[3px]'"
+              />
+            </button>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">收件邮箱</label>
+            <p class="text-xs mb-1" style="color: var(--text-color); opacity: 0.4;">多个邮箱用逗号分隔；留空则使用上面的「通知邮箱」</p>
+            <input
+              v-model="settings['sla_report_emails']"
+              type="text"
+              placeholder="admin@example.com"
+              class="w-full px-3 py-2 rounded-lg text-sm input-field"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">报告语言</label>
+            <CustomSelect
+              v-model="settings['sla_report_language']"
+              :options="[{ label: '跟随服务端配置', value: '' }, { label: '中文', value: 'zh-CN' }, { label: 'English', value: 'en-US' }]"
+            />
+          </div>
+
+          <div v-if="settings['last_sla_report_month']" class="text-xs" style="color: var(--text-color); opacity: 0.4;">
+            上次发送月份：{{ settings['last_sla_report_month'] }}
+          </div>
+
+          <button
+            @click="save"
+            :disabled="saving"
+            class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            :style="saving ? { opacity: 0.3 } : {}"
+          >
+            {{ saving ? '保存中...' : '保存配置' }}
           </button>
         </div>
       </div>

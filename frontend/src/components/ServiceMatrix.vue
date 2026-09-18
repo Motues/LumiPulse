@@ -2,8 +2,10 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { Incident } from '../api/types'
+import { useI18n } from '../composables/useI18n'
 
 const router = useRouter()
+const { t, formatMatrixDate, formatDuration } = useI18n()
 
 const props = defineProps<{
   days: [number, number, number][]
@@ -46,11 +48,15 @@ const tooltipY = ref(0)
 let hideTimer: ReturnType<typeof setTimeout> | null = null
 
 function formatDate(index: number, total: number): string {
-  // Use CST (UTC+8) for date calculation
+  return formatMatrixDate(matrixISO(index, total))
+}
+
+/** 矩阵第 index 格对应的日期（YYYY-MM-DD，按 CST 计算） */
+function matrixISO(index: number, total: number): string {
   const now = new Date()
   const cst = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
   cst.setUTCDate(cst.getUTCDate() - (total - 1 - index))
-  return `${cst.getUTCFullYear()}年${cst.getUTCMonth() + 1}月${cst.getUTCDate()}日`
+  return `${cst.getUTCFullYear()}-${String(cst.getUTCMonth() + 1).padStart(2, '0')}-${String(cst.getUTCDate()).padStart(2, '0')}`
 }
 
 function onCellEnter(e: MouseEvent, i: number) {
@@ -76,18 +82,8 @@ function onTooltipLeave() {
   hoveredIndex.value = -1
 }
 
-function timeText(minutes: number): string {
-  if (minutes < 60) return `${minutes}分钟`
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  return m > 0 ? `${h}小时${m}分钟` : `${h}小时`
-}
-
 function dateKey(index: number, total: number): string {
-  const now = new Date()
-  const cst = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
-  cst.setUTCDate(cst.getUTCDate() - (total - 1 - index))
-  return `${cst.getUTCFullYear()}-${String(cst.getUTCMonth() + 1).padStart(2, '0')}-${String(cst.getUTCDate()).padStart(2, '0')}`
+  return matrixISO(index, total)
 }
 </script>
 
@@ -125,19 +121,19 @@ function dateKey(index: number, total: number): string {
         <template v-if="days[hoveredIndex][0] === -1">
           <div class="flex items-center gap-2 text-sm" style="color: var(--text-color); opacity: 0.5;">
             <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(-1) }" />
-            无数据
+            {{ t('status.noData') }}
           </div>
         </template>
         <template v-else-if="days[hoveredIndex][1] === 0">
           <div class="flex items-center gap-2 text-sm" :style="{ color: getColorForDowntime(0) }">
             <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(0) }" />
-            服务运行正常
+            {{ t('status.healthyToday') }}
           </div>
         </template>
         <template v-else>
           <div class="flex items-center gap-2 text-sm font-medium" :style="{ color: getColorForDowntime(days[hoveredIndex][1]) }">
             <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(days[hoveredIndex][1]) }" />
-            异常时间：{{ timeText(days[hoveredIndex][1]) }}
+            {{ t('status.downtimeLabel', { duration: formatDuration(days[hoveredIndex][1]) }) }}
           </div>
           <template v-if="incidentsByDate && serviceId">
             <div
@@ -160,11 +156,11 @@ function dateKey(index: number, total: number): string {
 
     <!-- Bottom legend -->
     <div v-if="!hideLegend" class="flex items-center text-xs font-medium mt-1 tracking-tight">
-      <span class="flex-shrink-0" style="color: var(--text-color); opacity: 0.4;">{{ days.length }} 天前</span>
+      <span class="flex-shrink-0" style="color: var(--text-color); opacity: 0.4;">{{ t('status.daysAgo', { n: days.length }) }}</span>
       <span class="flex-1 mx-2 h-px" style="background-color: var(--button-border-color);" />
-      <span class="font-semibold flex-shrink-0" :style="{ color: getUptimeColor(uptime) }">{{ uptime.toFixed(1) }}% 在线率</span>
+      <span class="font-semibold flex-shrink-0" :style="{ color: getUptimeColor(uptime) }">{{ t('status.uptimeLabel', { n: uptime.toFixed(1) }) }}</span>
       <span class="flex-1 mx-2 h-px" style="background-color: var(--button-border-color);" />
-      <span class="flex-shrink-0" style="color: var(--text-color); opacity: 0.4;">今天</span>
+      <span class="flex-shrink-0" style="color: var(--text-color); opacity: 0.4;">{{ t('status.today') }}</span>
     </div>
   </div>
 </template>

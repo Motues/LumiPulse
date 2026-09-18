@@ -11,7 +11,18 @@ const loading = ref(true)
 const { show: toast } = useToast()
 const showForm = ref(false)
 const editing = ref<Maintenance | null>(null)
-const form = ref({ title: '', description: '', scheduledStart: '', scheduledEnd: '', status: 'scheduled', affectedServices: '' })
+const form = ref({
+  title: '',
+  description: '',
+  scheduledStart: '',
+  scheduledEnd: '',
+  status: 'scheduled',
+  affectedServices: '',
+  recurrence: '',
+  recurrenceInterval: 1,
+  recurrenceMonthday: 0,
+  recurrenceUntil: '',
+})
 
 const { markClean: cleanMtn, handleClose: closeMtn, restoreFromStorage: restoreMtn } = useUnsavedChanges(form as any, 'mtn_form')
 
@@ -110,6 +121,51 @@ const statusLabel: Record<string, string> = {
   cancelled: '已取消',
 }
 
+// ---- 周期维护 ----
+
+const recurrenceOptions = [
+  { label: '不重复（一次性）', value: '' },
+  { label: '每天', value: 'daily' },
+  { label: '每周', value: 'weekly' },
+  { label: '每月', value: 'monthly' },
+]
+
+const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+/** 把重复规则描述成一句话，列表里作为标签展示 */
+function recurrenceLabel(m: Maintenance): string {
+  const interval = m.recurrenceInterval || 1
+  switch (m.recurrence) {
+    case 'daily':
+      return interval === 1 ? '每天' : `每 ${interval} 天`
+    case 'weekly': {
+      // 重复日期由开始时间的星期决定，这里直接由 scheduledStart 推导，避免回显不一致
+      const weekday = weekdayOf(m.scheduledStart)
+      const day = weekday ? WEEKDAY_LABELS[weekday] : ''
+      return interval === 1 ? `每周${day}` : `每 ${interval} 周${day}`
+    }
+    case 'monthly':
+      return interval === 1 ? '每月' : `每 ${interval} 个月`
+    default:
+      return ''
+  }
+}
+
+/** 从 ISO / datetime-local 串里取星期（1=周一 … 7=周日） */
+function weekdayOf(iso: string): number {
+  if (!iso) return 0
+  const s = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + CST_OFFSET
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return 0
+  const day = d.getDay() // 0=周日
+  return day === 0 ? 7 : day
+}
+
+/** 重复截止日期的展示文案 */
+function recurrenceUntilLabel(m: Maintenance): string {
+  return m.recurrenceUntil ? `至 ${m.recurrenceUntil}` : ''
+}
+
 async function load() {
   loading.value = true
   try {
@@ -133,7 +189,18 @@ async function loadServices() {
 
 function openCreate() {
   editing.value = null
-  const defaults = { title: '', description: '', scheduledStart: '', scheduledEnd: '', status: 'scheduled', affectedServices: '' }
+  const defaults = {
+    title: '',
+    description: '',
+    scheduledStart: '',
+    scheduledEnd: '',
+    status: 'scheduled',
+    affectedServices: '',
+    recurrence: '',
+    recurrenceInterval: 1,
+    recurrenceMonthday: 0,
+    recurrenceUntil: '',
+  }
   form.value = { ...defaults }
   selectedServices.value = []
   serviceSearch.value = ''
@@ -153,6 +220,10 @@ function openEdit(m: Maintenance) {
     scheduledEnd: toDatetimeLocalValue(m.scheduledEnd),
     status: m.status,
     affectedServices: m.affectedServices || '',
+    recurrence: m.recurrence || '',
+    recurrenceInterval: m.recurrenceInterval || 1,
+    recurrenceMonthday: m.recurrenceMonthday || 0,
+    recurrenceUntil: m.recurrenceUntil || '',
   }
   selectedServices.value = m.affectedServices ? m.affectedServices.split(',').map(Number) : []
   serviceSearch.value = ''
@@ -171,6 +242,10 @@ async function save() {
     ...form.value,
     scheduledStart: toCSTISO(form.value.scheduledStart),
     scheduledEnd: toCSTISO(form.value.scheduledEnd),
+    // 一次性维护窗口：清空周期参数，避免残留脏数据
+    recurrenceInterval: form.value.recurrence ? Number(form.value.recurrenceInterval) || 1 : 0,
+    recurrenceMonthday: form.value.recurrence === 'monthly' ? Number(form.value.recurrenceMonthday) || 0 : 0,
+    recurrenceUntil: form.value.recurrence ? form.value.recurrenceUntil : '',
   }
   try {
     if (editing.value) {
@@ -231,7 +306,20 @@ onMounted(() => {
         </thead>
         <tbody class="divide-y">
           <tr v-for="m in maintenances" :key="m.id">
-            <td class="px-6 py-4 font-bold" style="color: var(--text-color);">{{ m.title }}</td>
+            <td class="px-6 py-4 font-bold" style="color: var(--text-color);">
+              {{ m.title }}
+              <div v-if="m.recurrence" class="mt-1 flex items-center gap-1.5 font-normal">
+                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-400">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {{ recurrenceLabel(m) }}
+                </span>
+                <span v-if="m.recurrenceUntil" class="text-[10px]" style="color: var(--text-color); opacity: 0.4;">
+                  {{ recurrenceUntilLabel(m) }}
+                </span>
+              </div>
+            </td>
             <td class="px-6 py-4">
               <span :class="['inline-flex items-center px-2 py-1 rounded text-xs font-medium border', statusClass(m.status)]">
                 {{ statusLabel[m.status] || m.status }}
@@ -284,6 +372,61 @@ onMounted(() => {
           <div>
             <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">状态</label>
             <CustomSelect v-model="form.status" :options="[{ label: '计划中', value: 'scheduled' }, { label: '进行中', value: 'in_progress' }, { label: '已完成', value: 'completed' }, { label: '已取消', value: 'cancelled' }]" />
+          </div>
+
+          <!-- 周期重复：窗口结束后由服务端推进到下一个窗口 -->
+          <div class="rounded-lg p-3 space-y-3" style="border: 1px solid var(--button-border-color);">
+            <div>
+              <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">重复</label>
+              <CustomSelect v-model="form.recurrence" :options="recurrenceOptions" />
+            </div>
+
+            <template v-if="form.recurrence">
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">
+                    {{ form.recurrence === 'daily' ? '每隔几天' : form.recurrence === 'weekly' ? '每隔几周' : '每隔几个月' }}
+                  </label>
+                  <input
+                    v-model.number="form.recurrenceInterval"
+                    type="number"
+                    min="1"
+                    max="365"
+                    class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">重复截止</label>
+                  <input
+                    v-model="form.recurrenceUntil"
+                    type="date"
+                    class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
+                  />
+                </div>
+              </div>
+              <div v-if="form.recurrence === 'monthly'">
+                <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">每月第几天</label>
+                <input
+                  v-model.number="form.recurrenceMonthday"
+                  type="number"
+                  min="0"
+                  max="31"
+                  placeholder="留空则按开始日期"
+                  class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
+                />
+              </div>
+              <p class="text-xs" style="color: var(--text-color); opacity: 0.45;">
+                {{
+                  form.recurrence === 'weekly'
+                    ? '重复日期由开始时间的星期决定（例如开始时间选在周日 02:00，则每周日 02:00 重复）。'
+                    : '窗口结束后服务端会自动把开始/结束时间推进到下一个窗口，状态回到「计划中」。'
+                }}
+                重复截止留空表示一直重复。
+              </p>
+            </template>
           </div>
           <div class="relative">
             <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">受影响服务</label>

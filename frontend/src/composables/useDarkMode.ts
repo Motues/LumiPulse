@@ -14,6 +14,7 @@ function applyDark(val: boolean) {
   } else {
     document.documentElement.classList.remove('dark')
   }
+  applyThemeColor(val)
 }
 
 function applyMode() {
@@ -22,6 +23,20 @@ function applyMode() {
   } else {
     applyDark(themeMode.value === 'dark')
   }
+}
+
+// 浏览器 UI 主题色。index.html 里已有一份随系统偏好切换的声明，
+// 这里按用户显式选择覆盖它（media 需去掉，否则会与显式选择打架）。
+const THEME_COLORS = { light: '#ffffff', dark: '#0a0a0a' } as const
+
+function applyThemeColor(val: boolean) {
+  document
+    .querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')
+    .forEach(el => el.remove())
+  const meta = document.createElement('meta')
+  meta.name = 'theme-color'
+  meta.content = THEME_COLORS[val ? 'dark' : 'light']
+  document.head.appendChild(meta)
 }
 
 function onSystemChange(e: MediaQueryListEvent) {

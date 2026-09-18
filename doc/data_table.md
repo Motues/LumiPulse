@@ -113,9 +113,45 @@
 | `scheduled_end` | DATETIME | NOT NULL | 计划结束时间 |
 | `status` | TEXT | DEFAULT 'scheduled' | 状态：`scheduled`, `in_progress`, `completed`, `cancelled` |
 | `affected_services` | TEXT | DEFAULT '' | 受影响的服务 ID 列表（JSON 字符串或逗号分隔） |
+| `recurrence` | TEXT | DEFAULT '' | 周期重复方式：`daily`, `weekly`, `monthly`；空值=一次性维护窗口 |
+| `recurrence_interval` | INTEGER | DEFAULT 1 | 重复间隔（每 N 天 / N 周 / N 月） |
+| `recurrence_weekday` | INTEGER | DEFAULT 0 | 仅 `weekly`：1=周一 … 7=周日（仅用于回显，实际重复日期由 `scheduled_start` 的星期决定） |
+| `recurrence_monthday` | INTEGER | DEFAULT 0 | 仅 `monthly`：1~31，超出当月天数时取当月最后一天 |
+| `recurrence_until` | TEXT | DEFAULT '' | 重复截止日期（`YYYY-MM-DD`，含当天）；空值=一直重复 |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 
 索引：`idx_maintenance_status(status)`
+
+> 周期维护只保留「当前这次窗口 + 下一次窗口」：窗口结束后检查器把
+> `scheduled_start` / `scheduled_end` 推进到下一个窗口并将状态置回 `scheduled`，
+> 因此同一行的时间始终代表下一次（或正在进行）的维护窗口。
+
+---
+
+## 表：`ServiceMonthly`
+
+月度 SLA 汇总。`ServiceDaily` 会被 `DAILY_RETENTION_DAYS` 清理，而月报需要长期可查，
+因此在已结束月份的每日数据被清理前先固化到这里。
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
+| `service_id` | INTEGER | NOT NULL REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
+| `month` | TEXT | NOT NULL | 月份（格式：YYYY-MM） |
+| `uptime_count` | INTEGER | DEFAULT 0 | 当月成功探测次数 |
+| `downtime_count` | INTEGER | DEFAULT 0 | 当月失败探测次数 |
+| `total_latency` | INTEGER | DEFAULT 0 | 当月总延迟累加（与 `ServiceDaily` 口径一致） |
+| `incident_total` | INTEGER | DEFAULT 0 | 当月事件数（只统计根事件） |
+| `incident_downtime_seconds` | INTEGER | DEFAULT 0 | 当月事件造成的不可用时长（秒），跨月事件只计入落在本月的那一段 |
+| `recorded_at` | DATETIME | DEFAULT NULL | 最近一次写入时间 |
+| `closed_at` | DATETIME | DEFAULT NULL | 归档时间；空值表示月份尚未固化，数据仍可能变化 |
+
+约束：`UNIQUE(service_id, month)`
+
+索引：`idx_monthly_service_month(service_id, month)`
+
+> 归档时机：检查器每天清理前会归档最近 6 个月内已结束的月份；
+> 查询历史月份时若发现缺失也会即时固化。可用率按探测次数加权计算。
 
 ---
 
@@ -162,6 +198,16 @@
 | `email_enabled` | 是否启用邮件通知 | true, false |
 | `notify_services` | 通知关联的服务 ID | 1,2,3 |
 | `notify_emails` | 通知接收邮箱列表 | a@example.com,b@example.com |
+| `webhook_enabled` | 是否启用 Webhook 通知 | true, false |
+| `webhook_type` | Webhook 渠道 | generic, slack, discord, telegram |
+| `webhook_url` | Webhook 接收地址 | https://hooks.slack.com/services/... |
+| `webhook_secret` | 通用渠道的 HMAC-SHA256 签名密钥 | （返回时留空则不展示） |
+| `webhook_events` | 订阅的事件类型（逗号分隔） | down,up |
+| `webhook_telegram_chat_id` | Telegram 目标会话 ID | -1001234567890 |
+| `sla_report_enabled` | 是否每月自动发送 SLA 报告邮件 | true, false |
+| `sla_report_emails` | 月报收件邮箱；留空复用 `notify_emails` | a@example.com |
+| `sla_report_language` | 月报语言；留空跟随配置文件 `LANG` | zh-CN, en-US |
+| `last_sla_report_month` | 最近一次发送的月报月份（由服务端写入，用于去重） | 2026-05 |
 | `show_admin_footer_button` | 页脚是否显示管理后台链接 | true, false |
 | `custom_footer` | 自定义页脚 HTML 内容 | `<a href="...">我的站点</a>` |
 | `sub_enable_email` | 邮件订阅方式开关 | true, false |

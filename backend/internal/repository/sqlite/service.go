@@ -218,3 +218,32 @@ func (r *repo) DeleteOldHeartbeats(ctx context.Context, before string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM Heartbeat WHERE created_at < ?", before)
 	return err
 }
+
+// GetLatencyStats 计算窗口内的延迟分位数（p95 / p99 / 平均 / 峰值）。
+// 分位数用「近邻插值」在 SQL 内算：取第 ceil(q*n) 小的样本作为 q 分位。
+// SQLite 没有内置 percentile，这样写一次扫描即可，避免把窗口内所有样本搬到 Go 里排序。
+// since 需为 UTC 的 "2006-01-02 15:04:05" 格式。
+func (r *repo) GetLatencyStats(ctx context.Context, serviceID int64, since string) (*model.LatencyStats, error) {
+	// 成功判定与 GetLatencyBuckets 保持一致：成功 = (200<=status<400) 或 status=1（TCP 成功）
+	query := `WITH ok AS (
+		SELECT latency, ROW_NUMBER() OVER (ORDER BY latency ASC) AS rn, COUNT(*) OVER () AS n
+		FROM Heartbeat
+		WHERE service_id = ? AND created_at >= ?
+		  AND ((status >= 200 AND status < 400) OR status = 1)
+	)
+	SELECT
+		(SELECT n FROM ok LIMIT 1) AS samples,
+		(SELECT AVG(latency) FROM ok) AS avg,
+		(SELECT latency FROM ok WHERE rn = MAX(1, CAST((n * 0.95) + 0.9999 AS INTEGER)) LIMIT 1) AS p95,
+		(SELECT latency FROM ok WHERE rn = MAX(1, CAST((n * 0.99) + 0.9999 AS INTEGER)) LIMIT 1) AS p99,
+		(SELECT MAX(latency) FROM ok) AS max`
+
+	var stats model.LatencyStats
+	if err := r.db.GetContext(ctx, &stats, query, serviceID, since); err != nil {
+		return nil, err
+	}
+	if stats.Samples == 0 {
+		return nil, nil
+	}
+	return &stats, nil
+}

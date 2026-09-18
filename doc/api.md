@@ -42,9 +42,17 @@
   （含检查器自动创建或解决事件、自动流转维护状态）都会立即让它失效。
 - 延迟与每日统计接口的 `days` 会被夹紧到 `HEARTBEAT_RETENTION_DAYS` /
   `DAILY_RETENTION_DAYS`（见 `backend/README.md`），避免请求已被清理的时间范围却看不出原因。
+- 月度 SLA 报告（`/api/v1/admin/sla-report`）不受每日明细保留窗口限制：
+  已结束的月份会在后台归档到 `ServiceMonthly` 表，即使 `ServiceDaily` 被清理仍可查询。
+- `/robots.txt` 与 `/sitemap.xml` 在服务端动态生成（站点名、可收录 URL 都是运行时数据），
+  不依赖前端构建产物。
 - **公开页面不出现自增 ID**：服务与事件的详情页 URL 分别是
   `/services/:hash` 与 `/incidents/:hash`，均使用随机生成的 `publicHash`。
   响应体中的 `id` / `serviceId` 仅用于前端与本地列表匹配，**不要用于拼接 URL**。
+- **服务端生成内容的语言**由配置文件 `LANG`（`zh-CN` / `en-US`）决定，
+  影响 `/feed/*` 的标题与字段名、告警邮件、月度 SLA 报告邮件，以及检查器
+  自动创建的事件标题与进展文案。前端界面语言由浏览器决定（可在页脚手动切换），
+  与 `LANG` 相互独立。
 
 ---
 
@@ -118,7 +126,30 @@ GET /feed/atom
 
 **Content-Type**: `application/rss+xml` / `application/atom+xml`
 
-无需鉴权。
+无需鉴权。订阅源的标题、描述与字段名（状态 / 影响）按配置文件 `LANG`
+的语言渲染，并在 `<language>` / `xml:lang` 中声明对应标签。
+
+---
+
+### 爬虫文件
+
+```
+GET /robots.txt
+GET /sitemap.xml
+```
+
+`robots.txt` 允许收录公开状态页，屏蔽 `/api/`、`/admin`、`/login`、`/setup`，
+并在末尾给出 `Sitemap:` 绝对地址。
+
+`sitemap.xml` 由服务端根据运行时数据生成，包含：
+
+- 首页 `/`
+- 首页展示中的服务详情 `/services/:hash`
+- 最近 50 条事件详情 `/incidents/:hash`
+
+> 站点根地址取自 `X-Forwarded-Host` / `X-Forwarded-Proto`（反向代理后）或请求的 `Host`，
+> 因此部署在代理后面时请确保这两个头被正确透传，否则 sitemap 里的 URL 会是内网地址。
+> 两个接口都返回 `Cache-Control: public, max-age=3600`。
 
 ---
 
@@ -348,7 +379,14 @@ GET /api/v1/services/:hash/latency?days=1
     "start": "2026-05-24T00:00:00Z",
     "interval": 5,
     "latencies": [120, 115, 0, 130],
-    "statuses": [0, 0, -1, 1]
+    "statuses": [0, 0, -1, 1],
+    "stats": {
+      "samples": 61,
+      "avg": 143.31,
+      "p95": 219,
+      "p99": 260,
+      "max": 260
+    }
   }
 }
 ```
@@ -359,6 +397,11 @@ GET /api/v1/services/:hash/latency?days=1
 | `interval` | int | 数据间隔（分钟），固定为 5 |
 | `latencies` | int[] | 延迟数组（毫秒），无数据时为 0 |
 | `statuses` | int[] | 状态数组 |
+| `stats` | object \| null | 整个查询窗口的分位数汇总，窗口内没有成功样本时为 `null` |
+| `stats.samples` | int | 参与统计的成功样本数 |
+| `stats.avg` | float | 平均延迟（毫秒） |
+| `stats.p95` / `stats.p99` | float | 95 / 99 分位延迟（毫秒），近邻插值 |
+| `stats.max` | int | 窗口内最大延迟（毫秒） |
 
 每个数据点的时间 = `start + index * interval` 分钟。
 
@@ -366,6 +409,10 @@ GET /api/v1/services/:hash/latency?days=1
 
 > 失败判定：一次探测失败的条件是 **不满足** `200 ≤ status < 400` 或 `status = 1`（TCP 成功）。
 > 即 TCP 探测返回 `status = 0` 同样计入故障，与日志页口径一致。
+
+> `stats` 只统计成功样本：失败请求的耗时往往是超时上限，混进分位数会把 p95/p99
+> 直接顶到超时值，反而看不出正常请求的长尾。分位数在 SQLite 内用窗口函数一次算出，
+> 不会把窗口内的原始心跳搬到 Go 里排序。
 
 ---
 
@@ -744,6 +791,99 @@ GET /api/v1/admin/daily-stats?days=90
 
 ---
 
+### 月度 SLA 报告
+
+按月汇总可用率、事件与响应时间，供管理端「SLA 报告」页使用。
+
+```
+GET /api/v1/admin/sla-report?month=2026-05
+GET /api/v1/admin/sla-report/trend?months=6
+```
+
+**查询参数（sla-report）**
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `month` | string | 当前月 | 月份，格式 `YYYY-MM` |
+
+**查询参数（sla-report/trend）**
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `months` | int | 6 | 趋势窗口月数，上限 24 |
+
+**响应（sla-report）**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "month": "2026-05",
+    "label": "2026 年 05 月",
+    "days": 31,
+    "final": true,
+    "summary": {
+      "uptime": 99.87,
+      "totalProbes": 8640,
+      "downtimeProbes": 11,
+      "incidents": 2,
+      "downtimeSeconds": 5400,
+      "avgLatency": 138.4
+    },
+    "services": [
+      {
+        "serviceId": 1,
+        "publicHash": "9f2c…",
+        "name": "API 服务",
+        "uptime": 99.94,
+        "totalProbes": 4320,
+        "downtimeProbes": 3,
+        "incidents": 1,
+        "downtimeSeconds": 3600,
+        "avgLatency": 120.5,
+        "coveredDays": 31
+      }
+    ]
+  }
+}
+```
+
+**响应（sla-report/trend）**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "months": [
+      { "month": "2026-04", "label": "2026 年 04 月", "uptime": 99.99, "incidents": 0, "avgLatency": 121.2, "totalProbes": 8640 }
+    ],
+    "retainedDays": 90
+  }
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `final` | 月份已结束且数据已固化；为 `false` 表示当月数据仍在累积 |
+| `uptime` | 可用率，按探测次数加权（成功探测 / 总探测 × 100） |
+| `downtimeSeconds` | 事件造成的不可用时长（秒），跨月事件只计入落在本月的那一段 |
+| `coveredDays` | 该月内有探测数据的天数，为 0 表示该月没有数据（前端显示「无数据」） |
+| `retainedDays` | 每日明细保留天数，超出该范围的月份依赖已固化的月报 |
+
+> **留存策略**：`ServiceDaily` 会被 `DAILY_RETENTION_DAYS`（默认 90）清理，
+> 月报需要长期可查，因此已结束月份会在后台归档到 `ServiceMonthly` 表：
+> 检查器每天清理前，以及首次查询某个已结束月份时，都会把当月数据固化下来
+> （`final: true`）。之后即使每日明细被删除，月报仍可查询。
+> 归档最多回溯 6 个月，趋势最多 24 个月。
+>
+> 平均延迟按全部探测次数均摊 `total_latency`（`ServiceDaily` 的累计口径，
+> 成功与失败的探测耗时都计入，其中失败探测通常等于超时上限）。
+> 如果只想看成功请求的长尾，请使用延迟接口的 `stats`（只统计成功样本的分位数）。
+
+---
+
 ### 监控日志
 
 ```
@@ -817,6 +957,16 @@ GET /api/v1/admin/settings
     "email_enabled": "true",
     "notify_services": "",
     "notify_emails": "",
+    "webhook_enabled": "false",
+    "webhook_type": "generic",
+    "webhook_url": "",
+    "webhook_secret": "",
+    "webhook_events": "down,up",
+    "webhook_telegram_chat_id": "",
+    "sla_report_enabled": "false",
+    "sla_report_emails": "",
+    "sla_report_language": "",
+    "last_sla_report_month": "",
     "show_admin_footer_button": "true",
     "custom_footer": "",
     "sub_enable_email": "true",
@@ -917,6 +1067,105 @@ POST /api/v1/admin/test-email
   "message": "测试邮件发送成功"
 }
 ```
+
+---
+
+### 测试 Webhook
+
+```
+POST /api/v1/admin/test-webhook
+```
+
+使用**已保存的** webhook 设置发送一条测试消息（服务名固定为「LumiPulse 测试通知」，
+事件类型为 `down`），用于验证地址、渠道格式与签名配置。前端需先保存再测试。
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "测试 webhook 发送成功"
+}
+```
+
+地址未配置时返回 400；接收端返回非 2xx 或请求失败时返回 500，message 中带上游返回的摘要。
+
+#### Webhook 通知配置
+
+在「系统设置 → 通知管理」中配置，对应以下设置项：
+
+| 设置项 | 说明 |
+| --- | --- |
+| `webhook_enabled` | 是否启用，默认 `false` |
+| `webhook_type` | 渠道：`generic`（默认）/ `slack` / `discord` / `telegram` |
+| `webhook_url` | 接收地址。Telegram 为 `https://api.telegram.org/bot<token>/sendMessage` |
+| `webhook_secret` | 仅 `generic`：启用 HMAC-SHA256 签名 |
+| `webhook_events` | 订阅的事件，逗号分隔：`down`（异常）/ `up`（恢复）。留空视为都订阅 |
+| `webhook_telegram_chat_id` | 仅 `telegram`：目标会话 ID |
+
+**请求体形状**
+
+- `generic`：
+
+```json
+{
+  "event": "down",
+  "service": "API 服务",
+  "url": "https://api.example.com/health",
+  "message": "服务 API 服务 (...) 连续检测失败，已自动创建故障事件。\n\n检测时间: ...",
+  "timestamp": "2026-05-09T00:00:00Z"
+}
+```
+
+- `slack`：`{"text": "...", "attachments": [{"color": "#df2d2a", "title": "...", "text": "...", "fields": [...]}]}`
+- `discord`：`{"embeds": [{"title": "...", "description": "...", "color": 14626090, "timestamp": "...", "fields": [...]}]}`
+- `telegram`：`{"chat_id": "...", "text": "...", "parse_mode": "Markdown"}`
+
+**签名校验（仅 generic）**
+
+配置 `webhook_secret` 后，请求会额外带上两个头：
+
+| 请求头 | 说明 |
+| --- | --- |
+| `X-LumiPulse-Timestamp` | Unix 时间戳（秒） |
+| `X-LumiPulse-Signature` | `sha256=<hex>`，见下 |
+
+签名算法：
+
+```
+signature = HMAC-SHA256(secret, timestamp + "." + raw_request_body)
+```
+
+接收端伪代码：
+
+```python
+expected = hmac.new(secret.encode(), f"{ts}.".encode() + raw_body, hashlib.sha256).hexdigest()
+if not hmac.compare_digest(expected, signature.removeprefix("sha256=")):
+    reject()
+if abs(time.time() - int(ts)) > 300:   # 建议校验时间窗口，防重放
+    reject()
+```
+
+> 时间戳纳入签名，因此只有同时拿到 secret 才能伪造请求；建议接收端额外校验时间窗口。
+> 每次投递的超时上限为 10 秒，且投递在探测协程内同步进行，接收端过慢会拖慢探测节奏。
+> `X-LumiPulse-Event` 头会带上事件类型（`down` / `up`），方便接收端在解析请求体前分流。
+
+#### 月度 SLA 报告邮件配置
+
+在「系统设置 → 通知管理」中配置。启用后，服务端会在检测到「进入新月份」时
+（每日清理任务里判断一次）把**上一个自然月**的报告发给指定邮箱，内容与
+`GET /api/v1/admin/sla-report` 一致。
+
+| 设置项 | 说明 |
+| --- | --- |
+| `sla_report_enabled` | 是否启用，默认 `false` |
+| `sla_report_emails` | 收件邮箱，逗号分隔；**留空则复用 `notify_emails`** |
+| `sla_report_language` | 报告语言：留空跟随配置文件 `LANG`，也可固定 `zh-CN` / `en-US` |
+| `last_sla_report_month` | 只读，记录最近一次发送的月份（`YYYY-MM`），用于避免重复投递 |
+
+> 发送失败不会写入 `last_sla_report_month`，下一个清理周期会自动重试。
+> 上一个月完全没有探测数据时会跳过（不会发空报告）。
+> 发送依赖 SMTP 配置，且不受 `email_enabled` 影响（该开关只控制告警邮件）。
 
 ---
 
@@ -1278,6 +1527,26 @@ POST /api/v1/admin/incidents/:id/split
 更新计划时若某个时间字段传空字符串，则保留数据库中的原值；前端 `datetime-local` 输入框只接受
 `YYYY-MM-DDTHH:mm` 形式，因此编辑回填时需先把存储值转换成该形式，避免时间被清空或写成非法值。
 
+**周期维护**
+
+维护计划支持周期重复。同一个计划始终代表「当前这次窗口 + 下一次窗口」的时间：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `recurrence` | string | `daily` / `weekly` / `monthly`；空字符串表示一次性窗口 |
+| `recurrenceInterval` | int | 重复间隔，默认 1（每 N 天 / N 周 / N 月），上限 365 |
+| `recurrenceWeekday` | int | 仅 `weekly`：1=周一 … 7=周日。仅用于回显，实际重复日期由 `scheduledStart` 的星期决定 |
+| `recurrenceMonthday` | int | 仅 `monthly`：1~31，留空按 `scheduledStart` 的日期；超出当月天数时取当月最后一天（如 31 号 → 2 月 28 日） |
+| `recurrenceUntil` | string | 重复截止日期（含当天，`YYYY-MM-DD`），空值表示一直重复 |
+
+重复流转由检查器自动完成：窗口结束（`scheduledEnd` 已过）且状态为 `in_progress` 时，
+把 `scheduledStart` / `scheduledEnd` 推进到下一个窗口并把状态置回 `scheduled`；
+若已超过 `recurrenceUntil`，则按一次性维护处理，状态置为 `completed`。
+服务停机导致一次跨过多个窗口时，会连续推进到第一个尚未结束的未来窗口。
+
+> 更新接口里周期字段使用指针语义：字段缺席表示保持不变，显式传 `"recurrence": ""`
+> 才会把周期维护改回一次性窗口（同时清空其它周期字段）。
+
 #### 获取维护计划列表（管理用）
 
 ```
@@ -1300,7 +1569,10 @@ POST /api/v1/admin/maintenances
   "description": "主节点版本升级，预计停机 2 小时",
   "scheduledStart": "2026-05-15T02:00:00Z",
   "scheduledEnd": "2026-05-15T04:00:00Z",
-  "affectedServices": "1,2"
+  "affectedServices": "1,2",
+  "recurrence": "weekly",
+  "recurrenceInterval": 1,
+  "recurrenceUntil": "2026-12-31"
 }
 ```
 
@@ -1318,6 +1590,11 @@ POST /api/v1/admin/maintenances
     "scheduledEnd": "2026-05-15T04:00:00Z",
     "status": "scheduled",
     "affectedServices": "1,2",
+    "recurrence": "weekly",
+    "recurrenceInterval": 1,
+    "recurrenceWeekday": 0,
+    "recurrenceMonthday": 0,
+    "recurrenceUntil": "2026-12-31",
     "createdAt": "2026-05-09T00:00:00Z"
   }
 }
@@ -1335,9 +1612,13 @@ PUT /api/v1/admin/maintenances/:id
 {
   "scheduledStart": "2026-05-16T02:00:00Z",
   "scheduledEnd": "2026-05-16T04:00:00Z",
-  "status": "in_progress"
+  "status": "in_progress",
+  "recurrence": "",
+  "recurrenceUntil": ""
 }
 ```
+
+上例同时把该计划从周期维护改回一次性窗口（`recurrence` 显式传空）。
 
 #### 删除维护计划
 

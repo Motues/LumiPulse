@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,6 +17,9 @@ type Config struct {
 	HeartbeatRetentionDays int `yaml:"HEARTBEAT_RETENTION_DAYS"`
 	// DailyRetentionDays 每日汇总数据保留天数（默认 90，与每日统计接口的最大查询窗口一致）
 	DailyRetentionDays int `yaml:"DAILY_RETENTION_DAYS"`
+	// Lang 服务端生成内容（RSS / Atom 订阅源、告警邮件、月报邮件）的语言。
+	// 支持 zh-CN / en-US，默认 zh-CN（与历史文案保持一致）。
+	Lang string `yaml:"LANG"`
 }
 
 var GlobalConfig *Config
@@ -26,6 +30,7 @@ func DefaultConfig() *Config {
 		Port:                   3000,
 		HeartbeatRetentionDays: 30,
 		DailyRetentionDays:     90,
+		Lang:                   "zh-CN",
 	}
 }
 
@@ -43,6 +48,19 @@ func (c *Config) DailyRetention() int {
 		return 90
 	}
 	return c.DailyRetentionDays
+}
+
+// ContentLang 返回生效的对外内容语言（无法识别时退回 zh-CN）。
+// 返回字符串而不是 i18n.Lang，避免 config 反向依赖 i18n 包。
+func (c *Config) ContentLang() string {
+	if c == nil {
+		return "zh-CN"
+	}
+	lang := strings.TrimSpace(c.Lang)
+	if strings.HasPrefix(strings.ToLower(lang), "en") {
+		return "en-US"
+	}
+	return "zh-CN"
 }
 
 // LoadConfig 加载或初始化配置文件

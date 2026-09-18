@@ -5,89 +5,19 @@ import { api } from '../api/client'
 import type { SummaryResponse, Incident, ServiceSummary } from '../api/types'
 import ServiceMatrix from '../components/ServiceMatrix.vue'
 import PublicServiceDetail from '../components/PublicServiceDetail.vue'
-import { siteName, siteIcon, emailEnabled, showAdminButton, customFooter, subEnabledAny, subEnableEmail, subEnableRss, subEnableAtom } from '../composables/useSiteConfig'
-import { useDarkMode } from '../composables/useDarkMode'
+import PublicHeader from '../components/PublicHeader.vue'
+import PublicFooter from '../components/PublicFooter.vue'
+import PublicSubscribeModal from '../components/PublicSubscribeModal.vue'
+import { useI18n } from '../composables/useI18n'
 
 const route = useRoute()
 const router = useRouter()
-
-const { isDark, themeMode, setMode } = useDarkMode()
-
-const showThemeMenu = ref(false)
-
+const { t, formatDate, formatDateTime } = useI18n()
 const summary = ref<SummaryResponse | null>(null)
 const incidents = ref<Incident[]>([])
 const loading = ref(true)
 const error = ref('')
 const showSubscribeModal = ref(false)
-const subscribeTab = ref<'rss' | 'atom' | 'email'>('rss')
-const showServiceSelect = ref(false)
-const subscribeEmail = ref('')
-const subscribing = ref(false)
-const subscribeMsg = ref('')
-const subscribeMsgType = ref('success')
-const selectedServices = ref<number[]>([])
-const servicesList = ref<ServiceSummary[]>([])
-
-function openSubscribe() {
-  subscribeEmail.value = ''
-  subscribeMsg.value = ''
-  selectedServices.value = []
-  showServiceSelect.value = false
-  // Pick first available tab
-  subscribeTab.value = subEnableEmail.value ? 'email' : subEnableRss.value ? 'rss' : 'atom'
-  // Load services
-  if (summary.value?.services) {
-    servicesList.value = summary.value.services
-  }
-  showSubscribeModal.value = true
-}
-
-async function handleSubscribe() {
-  const email = subscribeEmail.value.trim()
-  if (!email) return
-  subscribing.value = true
-  subscribeMsg.value = ''
-  try {
-    await api.subscribe(email, selectedServices.value.length > 0 ? selectedServices.value : undefined)
-    subscribeMsg.value = '订阅成功！我们将通过邮件通知您服务状态变更。'
-    subscribeMsgType.value = 'success'
-    subscribeEmail.value = ''
-    selectedServices.value = []
-  } catch (e: any) {
-    subscribeMsg.value = e.message || '订阅失败，请稍后重试'
-    subscribeMsgType.value = 'error'
-  } finally {
-    subscribing.value = false
-  }
-}
-
-function closeSubscribeModal() {
-  showSubscribeModal.value = false
-  subscribeMsg.value = ''
-}
-
-function toggleService(id: number) {
-  const idx = selectedServices.value.indexOf(id)
-  if (idx >= 0) {
-    selectedServices.value.splice(idx, 1)
-  } else {
-    selectedServices.value.push(id)
-  }
-}
-
-function getFeedUrl(type: 'rss' | 'atom') {
-  return `${window.location.protocol}//${window.location.host}/feed/${type}`
-}
-
-function copyFeedUrl(type: 'rss' | 'atom') {
-  navigator.clipboard.writeText(getFeedUrl(type)).then(() => {
-    subscribeMsg.value = '链接已复制到剪贴板'
-    subscribeMsgType.value = 'success'
-    setTimeout(() => { subscribeMsg.value = '' }, 2000)
-  })
-}
-
 
 const statusColors: Record<string, string> = {
   operational: '#34a761',
@@ -95,41 +25,19 @@ const statusColors: Record<string, string> = {
   outage: '#df2d2a',
 }
 
-const statusText: Record<string, string> = {
-  operational: '正常',
-  degraded: '异常',
-  outage: '故障',
+function statusText(status: string): string {
+  switch (status) {
+    case 'operational': return t('status.operational')
+    case 'degraded': return t('status.degraded')
+    case 'outage': return t('status.outage')
+    default: return status
+  }
 }
 
-const incidentStatusLabel: Record<string, string> = {
-  investigating: '调查中',
-  identified: '已确认',
-  monitoring: '监控中',
-  resolved: '已解决',
-}
-
-const dateTimeOpts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Shanghai' }
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('zh-CN', { ...dateTimeOpts, year: 'numeric', month: 'long', day: 'numeric' })
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString('zh-CN', { ...dateTimeOpts, hour: '2-digit', minute: '2-digit' })
-}
-
-function formatDateTime(iso: string): string {
-  return `${formatDate(iso)} ${formatTime(iso)}`
-}
-
-function affectedServiceNames(ids: string): string {
-  if (!ids || !summary.value) return '-'
-  return ids.split(',').map(id => {
-    const svc = summary.value!.services.find(s => s.id === Number(id))
-    return svc ? svc.name : id
-  }).join(', ')
+function incidentStatusLabel(status: string): string {
+  const key = `incident.status.${status}`
+  const label = t(key)
+  return label === key ? status : label
 }
 
 function isServiceInMaintenance(serviceId: number): boolean {
@@ -231,12 +139,7 @@ async function loadDailyStats() {
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
-function closeThemeMenu() {
-  showThemeMenu.value = false
-}
-
 onMounted(async () => {
-  document.addEventListener('click', closeThemeMenu)
   isMobile.value = window.innerWidth < 768
   try {
     const [sumRes, incRes] = await Promise.all([
@@ -247,7 +150,7 @@ onMounted(async () => {
     incidents.value = incRes.data.incidents
     await loadDailyStats()
   } catch (e: any) {
-    error.value = e.message || '加载数据失败'
+    error.value = e.message || t('common.loadFailed')
   } finally {
     loading.value = false
   }
@@ -262,90 +165,21 @@ onMounted(async () => {
       summary.value = sumRes.data
       incidents.value = incRes.data.incidents
     } catch {
-      error.value = '数据刷新失败'
+      error.value = t('common.dataRefreshFailed')
     }
   }, 30000)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
-  document.removeEventListener('click', closeThemeMenu)
 })
 </script>
 
 <template>
-  <nav class="mt-4" style="background-color: var(--bg-color);">
-    <div class="max-w-[1000px] mx-auto px-6 h-16 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <img v-if="siteIcon" :src="siteIcon" class="w-6 h-6 object-contain" />
-        <img v-else src="/assets/logo.svg" class="w-6 h-6 object-contain" />
-        <span class="text-xl font-bold tracking-tight" style="color: var(--text-color);">{{ siteName }}</span>
-      </div>
-      <div class="flex items-center gap-3">
-        <a v-if="subEnabledAny" href="#" @click.prevent="openSubscribe" class="header-btn px-4 py-2 text-sm font-medium rounded-lg">订阅更新</a>
-        <div class="relative">
-          <button
-            @click.stop="showThemeMenu = !showThemeMenu"
-            class="header-btn px-2 py-2 rounded-lg"
-            title="切换主题"
-          >
-            <svg v-if="themeMode === 'light'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-            </svg>
-            <svg v-else-if="themeMode === 'dark'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" />
-            </svg>
-            <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
-            </svg>
-          </button>
-          <div
-            v-if="showThemeMenu"
-            class="absolute right-0 top-full mt-2 rounded-lg shadow-lg py-1.5 px-1.5 z-50 flex flex-col gap-0.5"
-            :style="{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--button-border-color)', width: '140px' }"
-            @click.stop
-          >
-            <button
-              @click="setMode('light'); showThemeMenu = false"
-              class="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors rounded-md"
-              :style="{ color: 'var(--text-color)', backgroundColor: themeMode === 'light' ? 'var(--button-hover-color)' : 'transparent' }"
-              onmouseover="this.style.backgroundColor='var(--button-hover-color)'"
-              onmouseout="this.style.backgroundColor=this.dataset.active === 'true' ? 'var(--button-hover-color)' : 'transparent'"
-              :data-active="themeMode === 'light'"
-            >
-              <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-              浅色模式
-            </button>
-            <button
-              @click="setMode('dark'); showThemeMenu = false"
-              class="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors rounded-md"
-              :style="{ color: 'var(--text-color)', backgroundColor: themeMode === 'dark' ? 'var(--button-hover-color)' : 'transparent' }"
-              onmouseover="this.style.backgroundColor='var(--button-hover-color)'"
-              onmouseout="this.style.backgroundColor=this.dataset.active === 'true' ? 'var(--button-hover-color)' : 'transparent'"
-              :data-active="themeMode === 'dark'"
-            >
-              <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></svg>
-              深色模式
-            </button>
-            <button
-              @click="setMode('system'); showThemeMenu = false"
-              class="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors rounded-md"
-              :style="{ color: 'var(--text-color)', backgroundColor: themeMode === 'system' ? 'var(--button-hover-color)' : 'transparent' }"
-              onmouseover="this.style.backgroundColor='var(--button-hover-color)'"
-              onmouseout="this.style.backgroundColor=this.dataset.active === 'true' ? 'var(--button-hover-color)' : 'transparent'"
-              :data-active="themeMode === 'system'"
-            >
-              <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
-              跟随系统
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </nav>
+  <PublicHeader :on-subscribe="() => (showSubscribeModal = true)" />
 
   <main class="max-w-[1000px] mx-auto px-6 py-8">
-    <div v-if="loading" class="text-center py-20" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+    <div v-if="loading" class="text-center py-20" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
     <div v-else-if="error" class="text-center py-20 text-red-500">{{ error }}</div>
 
     <template v-else-if="summary">
@@ -358,7 +192,7 @@ onUnmounted(() => {
       ]">
         <div class="relative z-10">
             <h1 :class="['text-3xl font-bold mb-1', summary.overallStatus === 'operational' ? 'text-[#2d7a47] dark:text-[#4ade80]' : 'text-[#9e1f1e] dark:text-[#f87171]']">
-              {{ summary.overallStatus === 'operational' ? '所有系统运行正常' : '系统出现故障' }}
+              {{ summary.overallStatus === 'operational' ? t('home.allOperational') : t('home.outage') }}
             </h1>
         </div>
       </section>
@@ -366,11 +200,11 @@ onUnmounted(() => {
       <!-- Maintenance Plans (if any) — 仅首页展示，详情页不出现 -->
       <section v-if="!isDetailView && summary.maintenances && summary.maintenances.length > 0" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
         <div>
-          <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">维护计划</h3>
+          <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">{{ t('home.maintenances') }}</h3>
           <div v-for="m in summary.maintenances" :key="m.id" class="mb-3 last:mb-0 pb-3 last:pb-0">
             <p class="text-sm font-medium" style="color: var(--text-color);">{{ m.title }}</p>
             <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.5;">
-              {{ formatDateTime(m.scheduledStart) }} CST - {{ formatDateTime(m.scheduledEnd) }} CST
+              {{ formatDateTime(m.scheduledStart) }} {{ t('common.cst') }} - {{ formatDateTime(m.scheduledEnd) }} {{ t('common.cst') }}
             </p>
             <p v-if="m.description" class="text-xs mt-1" style="color: var(--text-color); opacity: 0.5;">{{ m.description }}</p>
           </div>
@@ -387,14 +221,14 @@ onUnmounted(() => {
 
       <!-- 分享链接失效：hash 对应不上任何首页可见的服务 -->
       <section v-else-if="serviceNotFound" class="rounded-lg p-8 mb-8 text-center" style="border: 1px solid var(--button-border-color);">
-        <p class="text-sm mb-3" style="color: var(--text-color); opacity: 0.6;">未找到该服务，可能已被删除或不再在首页展示。</p>
-        <button @click="closeService" class="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:opacity-80 transition-opacity">返回状态页</button>
+        <p class="text-sm mb-3" style="color: var(--text-color); opacity: 0.6;">{{ t('common.notFoundService') }}</p>
+        <button @click="closeService" class="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:opacity-80 transition-opacity">{{ t('common.backToStatus') }}</button>
       </section>
 
       <!-- Service Status -->
       <section v-else class="rounded-lg mb-8 pb-4" style="border: 1px solid var(--button-border-color);">
         <div class="flex items-center justify-between p-6 pb-4 mb-4">
-          <h2 class="text-lg font-bold" style="color: var(--text-color);">系统状态</h2>
+          <h2 class="text-lg font-bold" style="color: var(--text-color);">{{ t('home.systemStatus') }}</h2>
         </div>
 
         <template v-for="(svc, idx) in summary.services" :key="svc.id">
@@ -406,7 +240,7 @@ onUnmounted(() => {
               <div class="flex items-center">
                 <span
                   class="font-bold leading-none cursor-pointer text-[color:var(--text-color)] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
-                  title="查看服务详情"
+                  :title="t('home.viewServiceDetail')"
                   @click="openService(svc)"
                 >{{ svc.name }}</span>
                 <span
@@ -440,7 +274,7 @@ onUnmounted(() => {
               }">
                 <div v-if="isServiceInMaintenance(svc.id)" class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500"></div>
                 <div v-else class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[svc.status] }"></div>
-                {{ isServiceInMaintenance(svc.id) ? '维护中' : statusText[svc.status] }}
+                {{ isServiceInMaintenance(svc.id) ? t('status.maintenance') : statusText(svc.status) }}
               </div>
             </div>
             <ServiceMatrix :days="getServiceDays(svc.id)" :uptime="svc.uptime" :service-id="svc.id" :incidents-by-date="incidentsByDate" />
@@ -450,7 +284,7 @@ onUnmounted(() => {
 
       <!-- Past Incidents — 仅首页展示，详情页不出现 -->
       <section v-if="!isDetailView && incidents.length > 0" class="mb-8">
-        <h2 class="text-lg font-bold mb-4" style="color: var(--text-color);">过去事件</h2>
+        <h2 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ t('home.pastIncidents') }}</h2>
         <div v-for="inc in incidents" :key="inc.publicHash" class="rounded-lg p-6 mb-4 cursor-pointer border border-[color:var(--button-border-color)] hover:border-emerald-500/30 dark:hover:border-emerald-400/30 transition-colors" @click="router.push(`/incidents/${inc.publicHash}`)">
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div class="flex items-center gap-2">
@@ -463,7 +297,7 @@ onUnmounted(() => {
                 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400': inc.updates[inc.updates.length - 1].status === 'investigating' || inc.updates[inc.updates.length - 1].status === 'identified',
                 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400': inc.updates[inc.updates.length - 1].status === 'monitoring',
                 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400': inc.updates[inc.updates.length - 1].status === 'resolved',
-              }">{{ incidentStatusLabel[inc.updates[inc.updates.length - 1].status] || inc.updates[inc.updates.length - 1].status }}</span>
+              }">{{ incidentStatusLabel(inc.updates[inc.updates.length - 1].status) }}</span>
             </div>
             <div class="text-sm font-medium" style="color: var(--text-color); opacity: 0.5;">{{ formatDate(inc.createdAt) }}</div>
           </div>
@@ -476,149 +310,21 @@ onUnmounted(() => {
       <!-- No Maintenance — 仅首页展示，详情页不出现 -->
       <section v-if="!isDetailView && (!summary.maintenances || summary.maintenances.length === 0)" class="rounded-lg p-6 mb-8" style="border: 1px solid var(--button-border-color);">
         <div>
-          <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">维护计划</h3>
-          <p class="text-sm mb-1" style="color: var(--text-color);">暂无计划的维护</p>
-          <p class="text-sm" style="color: var(--text-color); opacity: 0.5;">我们会提前通知受影响的服务维护计划。</p>
+          <h3 class="text-base font-bold mb-2" style="color: var(--text-color);">{{ t('home.maintenances') }}</h3>
+          <p class="text-sm mb-1" style="color: var(--text-color);">{{ t('home.noMaintenance') }}</p>
+          <p class="text-sm" style="color: var(--text-color); opacity: 0.5;">{{ t('home.noMaintenanceHint') }}</p>
         </div>
       </section>
-</template>
+    </template>
   </main>
 
-  <!-- Subscribe Modal -->
-  <Teleport to="body">
-    <div v-if="showSubscribeModal" class="fixed inset-0 z-50 flex items-center justify-center" @click.self="closeSubscribeModal">
-      <div class="absolute inset-0 bg-black/40" />
-      <div class="relative rounded-xl shadow-xl p-6 w-full max-w-md mx-4" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-base font-bold" style="color: var(--text-color);">订阅更新</h3>
-          <button @click="closeSubscribeModal" class="p-1 rounded-lg transition-colors hover:bg-[var(--button-hover-color)]" style="color: var(--text-color); opacity: 0.5;">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
+  <PublicFooter />
 
-        <!-- Tabs -->
-        <div class="flex border-b mb-4" style="border-color: var(--button-border-color);">
-          <button
-            v-for="tab in [
-              subEnableEmail ? { key: 'email', label: '邮件订阅' } : null,
-              subEnableRss ? { key: 'rss', label: 'RSS' } : null,
-              subEnableAtom ? { key: 'atom', label: 'Atom' } : null,
-            ].filter(Boolean)"
-            :key="(tab as any).key"
-            @click="subscribeTab = (tab as any).key; subscribeMsg = ''"
-            class="px-4 py-2 text-sm font-medium transition-colors -mb-px"
-            :class="subscribeTab === (tab as any).key ? 'border-b-2 border-emerald-500 text-emerald-600' : 'opacity-50 hover:opacity-80'"
-            style="color: subscribeTab === (tab as any).key ? '' : 'var(--text-color)';"
-          >{{ (tab as any).label }}</button>
-        </div>
-
-        <!-- Email Tab -->
-        <div v-if="subscribeTab === 'email'">
-          <p class="text-sm mb-3" style="color: var(--text-color); opacity: 0.6;">获取服务状态变更和事件通知。</p>
-            <div class="flex gap-2 mb-3">
-              <input
-                v-model="subscribeEmail"
-                type="email"
-                placeholder="输入邮箱地址..."
-                class="flex-1 px-4 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
-                style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
-              />
-              <button
-                @click="handleSubscribe"
-                :disabled="subscribing || !subscribeEmail"
-                class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                {{ subscribing ? '提交中...' : '订阅' }}
-              </button>
-            </div>
-
-            <!-- Service selection toggle -->
-            <div v-if="servicesList.length > 0">
-              <button @click="showServiceSelect = !showServiceSelect" type="button" class="text-xs flex items-center gap-1 transition-colors text-[color:var(--text-color)] opacity-50 hover:opacity-80">
-                <svg class="w-3.5 h-3.5" :class="showServiceSelect ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
-                {{ showServiceSelect ? '收起' : '选择特定服务' }}
-              </button>
-              <div v-if="showServiceSelect" class="mt-2">
-                <button
-                  @click="selectedServices = (selectedServices.length === servicesList.length ? [] : servicesList.map(s => s.id))"
-                  class="text-xs mb-2 transition-colors"
-                  style="color: var(--text-color); opacity: 0.5;"
-                >{{ selectedServices.length === servicesList.length ? '取消全选' : '全选' }}</button>
-                <div class="max-h-36 overflow-y-auto space-y-1 thin-scroll p-1">
-                  <label
-                    v-for="svc in servicesList"
-                    :key="svc.id"
-                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-colors hover:bg-[var(--button-hover-color)]"
-                  >
-                    <input
-                      type="checkbox"
-                      :checked="selectedServices.includes(svc.id)"
-                      @change="toggleService(svc.id)"
-                      class="rounded border-gray-300 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <span style="color: var(--text-color);">{{ svc.name }}</span>
-                  </label>
-                </div>
-                <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">留空则订阅所有服务</p>
-              </div>
-            </div>
-        </div>
-
-        <!-- RSS Tab -->
-        <div v-if="subscribeTab === 'rss'">
-          <p class="text-sm mb-3" style="color: var(--text-color); opacity: 0.6;">复制以下链接到 RSS 阅读器订阅状态更新。</p>
-          <div class="flex gap-2">
-            <input
-              :value="getFeedUrl('rss')"
-              readonly
-              class="flex-1 px-3 py-2 rounded-lg text-xs font-mono focus:outline-none"
-              style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
-            />
-            <button @click="copyFeedUrl('rss')" class="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium rounded-lg transition-colors whitespace-nowrap">
-              复制
-            </button>
-          </div>
-        </div>
-
-        <!-- Atom Tab -->
-        <div v-if="subscribeTab === 'atom'">
-          <p class="text-sm mb-3" style="color: var(--text-color); opacity: 0.6;">复制以下链接到 RSS 阅读器订阅状态更新。</p>
-          <div class="flex gap-2">
-            <input
-              :value="getFeedUrl('atom')"
-              readonly
-              class="flex-1 px-3 py-2 rounded-lg text-xs font-mono focus:outline-none"
-              style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
-            />
-            <button @click="copyFeedUrl('atom')" class="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium rounded-lg transition-colors whitespace-nowrap">
-              复制
-            </button>
-          </div>
-        </div>
-
-        <p v-if="subscribeMsg" :class="['text-xs mt-3', subscribeMsgType === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500']">{{ subscribeMsg }}</p>
-        <button
-          v-if="subscribeMsgType === 'success' && subscribeTab === 'email'"
-          @click="closeSubscribeModal"
-          class="mt-3 w-full px-4 py-2 text-sm font-medium rounded-lg modal-close-btn"
-        >
-          关闭
-        </button>
-      </div>
-    </div>
-  </Teleport>
-
-  <footer style="background-color: var(--bg-color);" class="mt-4">
-    <div class="max-w-[1000px] mx-auto px-6 py-8 flex flex-col md:flex-row justify-between items-center gap-4">
-      <div class="text-sm">
-        <a href="https://github.com/Motues/LumiPulse" target="_blank" rel="noopener noreferrer" class="footer-link transition-opacity">Powered By LumiPulse</a>
-      </div>
-      <div class="flex items-center gap-6 text-sm">
-        <span v-if="customFooter" v-html="customFooter" class="footer-link"></span>
-        <a v-else-if="showAdminButton" href="/dashboard" class="footer-link transition-opacity">管理后台</a>
-      </div>
-    </div>
-  </footer>
+  <PublicSubscribeModal
+    v-if="showSubscribeModal"
+    :services="summary?.services || []"
+    @close="showSubscribeModal = false"
+  />
 </template>
 
 <style scoped>

@@ -34,10 +34,22 @@ type Heartbeat struct {
 
 // LatencyResponse 紧凑延迟数据响应
 type LatencyResponse struct {
-	Start     string `json:"start"`     // 起始时间 ISO
-	Interval  int    `json:"interval"`  // 间隔分钟数
-	Latencies []int  `json:"latencies"` // 延迟数组 (ms)
-	Statuses  []int  `json:"statuses"`  // 状态数组 (0=正常, 1=故障, -1=无数据)
+	Start     string        `json:"start"`     // 起始时间 ISO
+	Interval  int           `json:"interval"`  // 间隔分钟数
+	Latencies []int         `json:"latencies"` // 延迟数组 (ms)
+	Statuses  []int         `json:"statuses"`  // 状态数组 (0=正常, 1=故障, -1=无数据)
+	Stats     *LatencyStats `json:"stats"`     // 窗口内延迟分位数汇总（无样本时为 null）
+}
+
+// LatencyStats 窗口内延迟分位数汇总。
+// 只统计成功样本：故障请求的耗时是超时等异常值，混进分位数会把 p95/p99 顶到超时上限，
+// 反而看不出"正常请求到底慢不慢"。
+type LatencyStats struct {
+	Samples int     `db:"samples" json:"samples"` // 参与统计的成功样本数
+	Avg     float64 `db:"avg" json:"avg"`         // 平均延迟
+	P95     float64 `db:"p95" json:"p95"`         // 95 分位（近邻插值）
+	P99     float64 `db:"p99" json:"p99"`         // 99 分位（近邻插值）
+	Max     int     `db:"max" json:"max"`         // 最大延迟
 }
 
 // LatencyBucket 延迟分桶聚合结果（在 SQLite 内聚合，避免把原始心跳搬到内存）
@@ -55,6 +67,76 @@ type ServiceDailyStats struct {
 	// PublicHash 公开访问标识，公开页面用它拼详情页 URL
 	PublicHash string   `json:"publicHash"`
 	Days       [][3]int `json:"days"`
+}
+
+// ServiceMonthly 月度 SLA 汇总。
+// ServiceDaily 受 DAILY_RETENTION_DAYS 限制会被清理，月报要能长期留存，
+// 因此在月末（或首次查询历史月份时）把每日汇总固化到这张表。
+type ServiceMonthly struct {
+	ID                   int64  `db:"id" json:"id"`
+	ServiceID            int64  `db:"service_id" json:"serviceId"`
+	Month                string `db:"month" json:"month"` // YYYY-MM
+	UptimeCount          int    `db:"uptime_count" json:"uptimeCount"`
+	DowntimeCount        int    `db:"downtime_count" json:"downtimeCount"`
+	TotalLatency         int    `db:"total_latency" json:"totalLatency"`
+	IncidentTotal        int    `db:"incident_total" json:"incidentTotal"`
+	IncidentDowntimeSecs int    `db:"incident_downtime_seconds" json:"incidentDowntimeSeconds"`
+	RecordedAt           string `db:"recorded_at" json:"recordedAt"`
+	ClosedAt             string `db:"closed_at" json:"closedAt"` // 空=月份尚未结束，数据仍可能变化
+	// CoveredDays 该月内有探测数据的天数（仅实时计算时填充，不落库）
+	CoveredDays int `db:"-" json:"coveredDays"`
+}
+
+// --- 月度 SLA 报告（API 响应模型）---
+
+// MonthlySLAReport 单个月份的 SLA 报告
+type MonthlySLAReport struct {
+	Month    string               `json:"month"` // YYYY-MM
+	Label    string               `json:"label"` // 展示用月份标签
+	Days     int                  `json:"days"`  // 该月天数
+	Final    bool                 `json:"final"` // 是否已固化（月份已结束且已归档）
+	Summary  MonthlySLASummary    `json:"summary"`
+	Services []*ServiceSLASummary `json:"services"`
+}
+
+// MonthlySLASummary 整站汇总
+type MonthlySLASummary struct {
+	Uptime          float64 `json:"uptime"`          // 整体可用率（按探测次数加权）
+	TotalProbes     int     `json:"totalProbes"`     // 总探测次数
+	DowntimeProbes  int     `json:"downtimeProbes"`  // 失败探测次数
+	Incidents       int     `json:"incidents"`       // 事件总数
+	DowntimeSeconds int     `json:"downtimeSeconds"` // 事件导致的累计不可用时长（秒）
+	AvgLatency      float64 `json:"avgLatency"`      // 平均响应时间（仅成功样本）
+}
+
+// ServiceSLASummary 单个服务的月度可用率
+type ServiceSLASummary struct {
+	ServiceID       int64   `json:"serviceId"`
+	PublicHash      string  `json:"publicHash"`
+	Name            string  `json:"name"`
+	Uptime          float64 `json:"uptime"`
+	TotalProbes     int     `json:"totalProbes"`
+	DowntimeProbes  int     `json:"downtimeProbes"`
+	Incidents       int     `json:"incidents"`
+	DowntimeSeconds int     `json:"downtimeSeconds"`
+	AvgLatency      float64 `json:"avgLatency"`
+	CoveredDays     int     `json:"coveredDays"` // 该月内有探测数据的天数
+}
+
+// SLATrendPoint 趋势图上的一个月份
+type SLATrendPoint struct {
+	Month       string  `json:"month"`
+	Label       string  `json:"label"`
+	Uptime      float64 `json:"uptime"`
+	Incidents   int     `json:"incidents"`
+	AvgLatency  float64 `json:"avgLatency"`
+	TotalProbes int     `json:"totalProbes"`
+}
+
+// SLATrendResponse 最近若干个月的整站趋势
+type SLATrendResponse struct {
+	Months   []*SLATrendPoint `json:"months"`
+	Retained int              `json:"retainedDays"` // 每日明细保留天数，用于提示可回填范围
 }
 
 // Server 服务器（逻辑分组）
@@ -120,6 +202,20 @@ type Maintenance struct {
 	Status           string `db:"status" json:"status"`                      // scheduled, in_progress, completed, cancelled
 	AffectedServices string `db:"affected_services" json:"affectedServices"` // JSON string or comma-separated IDs
 	CreatedAt        string `db:"created_at" json:"createdAt"`
+
+	// --- 周期维护 ---
+	// Recurrence 重复方式：daily / weekly / monthly。空值表示一次性维护窗口。
+	// 每次窗口结束后，检查器把 scheduled_start / scheduled_end 推进到下一个窗口，
+	// 因此同一个维护计划会一直代表「当前这次 + 下一次」的时间。
+	Recurrence string `db:"recurrence" json:"recurrence"`
+	// RecurrenceInterval 重复间隔，默认 1（每 N 天 / N 周 / N 月）
+	RecurrenceInterval int `db:"recurrence_interval" json:"recurrenceInterval"`
+	// RecurrenceWeekday 仅 weekly：1=周一 … 7=周日
+	RecurrenceWeekday int `db:"recurrence_weekday" json:"recurrenceWeekday"`
+	// RecurrenceMonthday 仅 monthly：1~31，超出当月天数时取当月最后一天
+	RecurrenceMonthday int `db:"recurrence_monthday" json:"recurrenceMonthday"`
+	// RecurrenceUntil 重复截止日期（含当天，YYYY-MM-DD）。空值表示一直重复。
+	RecurrenceUntil string `db:"recurrence_until" json:"recurrenceUntil"`
 }
 
 // User 管理后台用户
@@ -275,6 +371,12 @@ type CreateMaintenanceRequest struct {
 	ScheduledEnd     string `json:"scheduledEnd" binding:"required"`
 	Status           string `json:"status"`
 	AffectedServices string `json:"affectedServices"`
+	// 周期维护参数（留空即为一次性维护窗口）
+	Recurrence         string `json:"recurrence"`
+	RecurrenceInterval int    `json:"recurrenceInterval"`
+	RecurrenceWeekday  int    `json:"recurrenceWeekday"`
+	RecurrenceMonthday int    `json:"recurrenceMonthday"`
+	RecurrenceUntil    string `json:"recurrenceUntil"`
 }
 type UpdateMaintenanceRequest struct {
 	Title            string `json:"title"`
@@ -283,6 +385,12 @@ type UpdateMaintenanceRequest struct {
 	ScheduledEnd     string `json:"scheduledEnd"`
 	Status           string `json:"status"`
 	AffectedServices string `json:"affectedServices"`
+	// 周期维护参数。Recurrence 传空字符串表示改为一次性维护窗口。
+	Recurrence         *string `json:"recurrence"`
+	RecurrenceInterval *int    `json:"recurrenceInterval"`
+	RecurrenceWeekday  *int    `json:"recurrenceWeekday"`
+	RecurrenceMonthday *int    `json:"recurrenceMonthday"`
+	RecurrenceUntil    *string `json:"recurrenceUntil"`
 }
 
 // Subscriber 公开订阅用户

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '../../api/client'
-import type { ServiceDetail as ServiceDetailType } from '../../api/types'
+import type { ServiceDetail as ServiceDetailType, LatencyStats } from '../../api/types'
 import { useToast } from '../../composables/useToast'
 import LatencyChart from '../LatencyChart.vue'
 
@@ -18,6 +18,7 @@ const latencies = ref<number[]>([])
 const statuses = ref<number[]>([])
 const startTime = ref('')
 const intervalMin = ref(5)
+const stats = ref<LatencyStats | null>(null)
 const loading = ref(true)
 
 const hasData = computed(() => statuses.value.some(s => s !== -1))
@@ -38,16 +39,19 @@ async function loadLatency() {
   if (!hash) {
     latencies.value = []
     statuses.value = []
+    stats.value = null
     loading.value = false
     return
   }
   loading.value = true
+  stats.value = null
   try {
     const res = await api.getServiceLatency(hash, 1)
     latencies.value = res.data.latencies
     statuses.value = res.data.statuses
     startTime.value = res.data.start
     intervalMin.value = res.data.interval
+    stats.value = res.data.stats
   } catch (e: any) {
     toast(e.message || '加载失败')
   } finally {
@@ -109,7 +113,31 @@ watch(() => props.service.publicHash, () => {
 
     <!-- Latency chart -->
     <div class="rounded-xl p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-      <h3 class="font-bold mb-4" style="color: var(--text-color);">最近24小时延迟</h3>
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <h3 class="font-bold" style="color: var(--text-color);">最近24小时延迟</h3>
+        <span v-if="stats" class="text-xs" style="color: var(--text-color); opacity: 0.45;">
+          共 {{ stats.samples }} 个成功样本
+        </span>
+      </div>
+      <!-- 分位数摘要：均值会被尖峰平均掉，p95/p99 用来暴露长尾 -->
+      <div v-if="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-5">
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">平均延迟</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ Math.round(stats.avg) }}ms</div>
+        </div>
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">P95</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ Math.round(stats.p95) }}ms</div>
+        </div>
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">P99</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ Math.round(stats.p99) }}ms</div>
+        </div>
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">峰值</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ stats.max }}ms</div>
+        </div>
+      </div>
       <div v-if="loading" class="text-center py-12 " style="color: var(--text-color); opacity: 0.4;">加载中...</div>
       <div v-else-if="!hasData" class="text-center py-12 " style="color: var(--text-color); opacity: 0.4;">暂无数据</div>
       <LatencyChart

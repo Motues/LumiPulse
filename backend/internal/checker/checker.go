@@ -13,6 +13,7 @@ import (
 
 	"lumipluse-backend/internal/config"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/i18n"
 	"lumipluse-backend/internal/pkg/utils"
 	"lumipluse-backend/internal/repository"
 )
@@ -77,6 +78,9 @@ type HealthChecker struct {
 	wg             sync.WaitGroup
 	// onDataChange 数据变化回调（用于失效公开页缓存）
 	onDataChange func()
+	// onDailyMaintenance 每日任务回调（归档月报后触发，用于发送月报邮件）。
+	// 注入而不是直接依赖 handler 包，避免 checker ↔ handler 循环依赖。
+	onDailyMaintenance func(context.Context, time.Time)
 }
 
 func newHTTPClient(insecure bool) *http.Client {
@@ -110,6 +114,12 @@ func New(repo repository.Repository, insecureSkipVerify bool) *HealthChecker {
 // 这些变更同样需要让公开页缓存失效。
 func (hc *HealthChecker) SetOnDataChange(fn func()) {
 	hc.onDataChange = fn
+}
+
+// SetOnDailyMaintenance 注册每日任务回调。检查器在归档月报之后调用它，
+// 用于发送月度 SLA 报告邮件等「每天最多一次」的收尾工作。
+func (hc *HealthChecker) SetOnDailyMaintenance(fn func(context.Context, time.Time)) {
+	hc.onDailyMaintenance = fn
 }
 
 func (hc *HealthChecker) dataChanged() {
@@ -419,7 +429,7 @@ func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service
 	update := &model.IncidentUpdate{
 		IncidentID: inc.ID,
 		Status:     "resolved",
-		Content:    fmt.Sprintf("%s 服务已恢复运行", svc.Name),
+		Content:    i18n.Current().IncidentResolvedNote(svc.Name),
 	}
 	if err := hc.repo.CreateIncidentUpdate(ctx, update); err != nil {
 		utils.Info("checker failed to create incident update: %v", err)
@@ -457,7 +467,7 @@ func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service,
 
 	inc := &model.Incident{
 		ServiceID:        svc.ID,
-		Title:            fmt.Sprintf("%s 服务异常", svc.Name),
+		Title:            i18n.Current().IncidentTitle(svc.Name),
 		Impact:           "major",
 		Status:           "investigating",
 		AffectedServices: fmt.Sprintf("%d", svc.ID),
@@ -472,7 +482,7 @@ func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service,
 	update := &model.IncidentUpdate{
 		IncidentID: inc.ID,
 		Status:     "investigating",
-		Content:    fmt.Sprintf("检测到 %s 服务连续异常，正在排查中", svc.Name),
+		Content:    i18n.Current().IncidentCreatedNote(svc.Name),
 	}
 	hc.repo.CreateIncidentUpdate(ctx, update)
 
@@ -584,6 +594,13 @@ func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
 				changed = true
 			}
 		} else if m.Status == "in_progress" && !now.Before(end) {
+			// 周期维护：窗口结束后直接推进到下一个窗口，状态回到 scheduled；
+			// 周期已结束（超过 recurrence_until）则和一次性维护一样置为 completed。
+			if advanced, ok := hc.advanceRecurringMaintenance(ctx, m, start, end, now); ok {
+				changed = changed || advanced
+				continue
+			}
+
 			m.Status = "completed"
 			if err := hc.repo.UpdateMaintenance(ctx, m); err != nil {
 				utils.Info("checker failed to update maintenance #%d to completed: %v", m.ID, err)
@@ -599,27 +616,92 @@ func (hc *HealthChecker) reconcileMaintenanceStatus(ctx context.Context) {
 	}
 }
 
+// advanceRecurringMaintenance 把周期性维护推进到下一个窗口。
+// 返回 (是否改动, 是否是周期维护)：第二个返回值为 false 时调用方按一次性维护处理。
+func (hc *HealthChecker) advanceRecurringMaintenance(ctx context.Context, m *model.Maintenance, start, end time.Time, now time.Time) (bool, bool) {
+	if !normalizeRecurrence(m) {
+		return false, false
+	}
+
+	nextStart, nextEnd, ok := nextMaintenanceWindow(m, start, end)
+	if !ok {
+		utils.Info("checker maintenance #%d (%s) recurrence finished", m.ID, m.Title)
+		return false, false
+	}
+
+	// 服务停机一段时间后可能一次跳过多个窗口，这里连续推进到第一个未来窗口，
+	// 否则恢复运行后会立刻又进入一次「历史窗口」，状态显示会很怪。
+	for nextEnd.Before(now) {
+		nextStart, nextEnd, ok = nextMaintenanceWindow(m, nextStart, nextEnd)
+		if !ok {
+			utils.Info("checker maintenance #%d (%s) recurrence finished while catching up", m.ID, m.Title)
+			return false, false
+		}
+	}
+
+	m.ScheduledStart = toCSTString(nextStart)
+	m.ScheduledEnd = toCSTString(nextEnd)
+	m.Status = "scheduled"
+	if err := hc.repo.UpdateMaintenance(ctx, m); err != nil {
+		utils.Info("checker failed to advance maintenance #%d: %v", m.ID, err)
+		return false, true
+	}
+
+	utils.Info("checker advanced maintenance #%d (%s) to next window %s", m.ID, m.Title, m.ScheduledStart)
+	return true, true
+}
+
+// toCSTString 维护计划的时间统一按北京时间（UTC+8）存储，
+// 与前端 datetime-local 输入及管理端的展示口径保持一致。
+func toCSTString(t time.Time) string {
+	return t.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02T15:04:05+08:00")
+}
+
 func notifyAlert(name, url, ts string) {
+	lang := i18n.Current()
 	raw := utils.GetSetting("notify_services")
-	if raw == "" {
-		return
+	subject := lang.AlertSubject(name)
+	body := lang.AlertBody(name, url, ts)
+
+	// 邮件与 webhook 渠道相互独立，各自按自己的开关与订阅范围投递
+	if raw != "" {
+		if err := utils.SendAlert(subject, body); err != nil {
+			utils.Info("checker send alert failed: %v", err)
+		}
 	}
-	subject := fmt.Sprintf("服务异常告警: %s", name)
-	body := fmt.Sprintf("服务 %s (%s) 连续检测失败，已自动创建故障事件。\n\n检测时间: %s", name, url, ts)
-	if err := utils.SendAlert(subject, body); err != nil {
-		utils.Info("checker send alert failed: %v", err)
-	}
+	notifyWebhook(utils.WebhookEvent{
+		Event:   utils.WebhookEventDown,
+		Service: name,
+		URL:     url,
+		Time:    ts,
+		Message: body,
+	})
 }
 
 func notifyResolved(name string) {
+	lang := i18n.Current()
 	raw := utils.GetSetting("notify_services")
-	if raw == "" {
-		return
+	subject := lang.ResolvedSubject(name)
+	body := lang.ResolvedBody(name)
+
+	if raw != "" {
+		if err := utils.SendAlert(subject, body); err != nil {
+			utils.Info("checker send alert failed: %v", err)
+		}
 	}
-	subject := fmt.Sprintf("服务恢复通知: %s", name)
-	body := fmt.Sprintf("服务 %s 已恢复运行。", name)
-	if err := utils.SendAlert(subject, body); err != nil {
-		utils.Info("checker send alert failed: %v", err)
+	notifyWebhook(utils.WebhookEvent{
+		Event:   utils.WebhookEventUp,
+		Service: name,
+		Time:    time.Now().Format(time.RFC3339),
+		Message: body,
+	})
+}
+
+// notifyWebhook 发送 webhook 通知。未配置时 SendWebhookNotifier 会直接返回 nil，
+// 因此这里只需处理真正发送失败的情况，且失败不影响探测主流程。
+func notifyWebhook(evt utils.WebhookEvent) {
+	if err := utils.SendWebhookNotifier(evt); err != nil {
+		utils.Info("checker send webhook failed: %v", err)
 	}
 }
 
@@ -666,6 +748,9 @@ func (hc *HealthChecker) cleanup(ctx context.Context) {
 	dailyDays := config.GlobalConfig.DailyRetention()
 	heartbeatDays := config.GlobalConfig.HeartbeatRetention()
 
+	// 必须在删除旧每日明细之前归档：月报要覆盖的时间范围比每日明细的保留窗口更长
+	hc.archiveFinishedMonths(ctx)
+
 	beforeDaily := time.Now().AddDate(0, 0, -dailyDays).Format("2006-01-02")
 	if err := hc.repo.DeleteOldServiceDailies(ctx, beforeDaily); err != nil {
 		utils.Info("checker cleanup dailies failed: %v", err)
@@ -678,6 +763,75 @@ func (hc *HealthChecker) cleanup(ctx context.Context) {
 		utils.Info("checker cleanup heartbeats failed: %v", err)
 	} else {
 		utils.Info("checker cleaned up heartbeats older than 7 days")
+	}
+
+	// 每日收尾任务（月报邮件等）。回调内部自行判断是否需要真的发送。
+	if hc.onDailyMaintenance != nil {
+		hc.onDailyMaintenance(ctx, time.Now())
+	}
+}
+
+// archiveFinishedMonths 把已结束月份的每日明细汇总进 ServiceMonthly。
+// ServiceDaily 会被 DAILY_RETENTION_DAYS 清理，而月报需要长期可查，
+// 因此每次清理前先把已结束的月份固化下来（已固化的月份跳过）。
+func (hc *HealthChecker) archiveFinishedMonths(ctx context.Context) {
+	now := time.Now().UTC()
+	currentMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	const lookbackMonths = 6
+	for i := 1; i <= lookbackMonths; i++ {
+		month := currentMonth.AddDate(0, -i, 0)
+		monthKey := month.Format("2006-01")
+
+		stored, err := hc.repo.ListServiceMonthlies(ctx, monthKey)
+		if err != nil {
+			utils.Info("checker list monthly reports failed for %s: %v", monthKey, err)
+			continue
+		}
+		// 已经固化的月份不再重算，避免重复累加
+		closed := make(map[int64]bool, len(stored))
+		for _, m := range stored {
+			if m.ClosedAt != "" {
+				closed[m.ServiceID] = true
+			}
+		}
+
+		from := month.Format("2006-01-02")
+		toExclusive := month.AddDate(0, 1, 0).Format("2006-01-02")
+
+		aggregated, err := hc.repo.AggregateServiceMonthly(ctx, from, toExclusive)
+		if err != nil {
+			utils.Info("checker aggregate monthly reports failed for %s: %v", monthKey, err)
+			continue
+		}
+		incidentCounts, err := hc.repo.CountIncidentsBetween(ctx, from, toExclusive)
+		if err != nil {
+			incidentCounts = nil
+		}
+		incidentDowntime, err := hc.repo.AggregateIncidentDowntime(ctx, from, toExclusive)
+		if err != nil {
+			incidentDowntime = nil
+		}
+
+		closedAt := now.Format("2006-01-02T15:04:05Z")
+		archived := 0
+		for _, m := range aggregated {
+			if closed[m.ServiceID] {
+				continue
+			}
+			m.Month = monthKey
+			m.IncidentTotal = incidentCounts[m.ServiceID]
+			m.IncidentDowntimeSecs = incidentDowntime[m.ServiceID]
+			m.ClosedAt = closedAt
+			if err := hc.repo.UpsertServiceMonthly(ctx, m, false); err != nil {
+				utils.Info("checker archive monthly report failed for service %d %s: %v", m.ServiceID, monthKey, err)
+				continue
+			}
+			archived++
+		}
+		if archived > 0 {
+			utils.Info("checker archived %d service(s) for month %s", archived, monthKey)
+		}
 	}
 }
 

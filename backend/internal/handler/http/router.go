@@ -29,6 +29,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 	r.GET("/feed/rss", h.GetRSSFeed)
 	r.GET("/feed/atom", h.GetAtomFeed)
 
+	// 爬虫文件：站点名与可收录 URL 都是运行时数据，必须动态生成
+	r.GET("/robots.txt", h.GetRobotsTxt)
+	r.GET("/sitemap.xml", h.GetSitemap)
+
 	// Admin API
 	admin := r.Group("/api/v1/admin")
 	{
@@ -43,6 +47,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 			// 批量每日统计（含未在首页展示的服务），避免管理端按服务逐个请求
 			auth.GET("/daily-stats", h.AdminBatchDailyStats)
 
+			// 月度 SLA 报告（按月汇总，历史月份会固化到 ServiceMonthly）
+			auth.GET("/sla-report", h.GetMonthlySLA)
+			auth.GET("/sla-report/trend", h.SLATrend)
+
 			// Logs
 			auth.GET("/logs", h.AdminListLogs)
 
@@ -56,6 +64,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 
 			// Notifications
 			auth.POST("/test-email", h.TestEmail)
+			auth.POST("/test-webhook", h.TestWebhook)
 
 			// Services
 			auth.GET("/services", h.AdminListServices)

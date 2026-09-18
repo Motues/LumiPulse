@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const Version = "0.1.8"
+const Version = "0.1.9"
 
 // sqliteDSN 构造带 pragma 的 SQLite 连接串。
 // 说明：busy_timeout / foreign_keys 是「每连接」设置，必须写进 DSN 才能对
@@ -85,6 +85,8 @@ func main() {
 	hc := checker.New(repo, cfg.InsecureSkipVerify)
 	// 检查器会自动创建/解决事件并改动服务状态，需要同步失效公开页缓存
 	hc.SetOnDataChange(handler.InvalidateSummary)
+	// 月报归档完成后，按设置发送上一个自然月的 SLA 报告邮件
+	hc.SetOnDailyMaintenance(handler.SendMonthlySLAReportIfDue)
 	hc.Start(context.Background())
 
 	r := gin.New()

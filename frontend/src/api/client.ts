@@ -63,7 +63,7 @@ export const api = {
   getServiceHistory: (hash: string, days = 90) =>
     request<ApiResponse<import('./types').ServiceHistoryResponse>>('GET', `/services/${encodeURIComponent(hash)}/history?days=${days}`),
   getServiceLatency: (hash: string, days = 1) =>
-    request<ApiResponse<{ start: string; interval: number; latencies: number[]; statuses: number[] }>>('GET', `/services/${encodeURIComponent(hash)}/latency?days=${days}`),
+    request<ApiResponse<import('./types').LatencyResponse>>('GET', `/services/${encodeURIComponent(hash)}/latency?days=${days}`),
   getPublicIncidents: (page = 1, limit = 20) =>
     request<ApiResponse<{ incidents: import('./types').Incident[]; pagination: import('./types').Pagination }>>('GET', `/incidents?page=${page}&limit=${limit}`),
   // 公开事件详情使用随机 hash 访问，不暴露数据库自增 ID
@@ -99,9 +99,15 @@ export const api = {
 
   // Admin - Dashboard
   getStats: () => request<ApiResponse<import('./types').DashboardStats>>('GET', '/admin/stats', undefined, true),
-  // 管理端批量每日统计（含未在首页展示的服务）
+  // 批量每日统计（含未在首页展示的服务），避免管理端按服务逐个请求
   getAdminBatchDailyStats: (days = 90) =>
     request<ApiResponse<import('./types').BatchDailyStatsResponse>>('GET', `/admin/daily-stats?days=${days}`, undefined, true),
+
+  // Admin - 月度 SLA 报告
+  getSLAReport: (month: string) =>
+    request<ApiResponse<import('./types').MonthlySLAReport>>('GET', `/admin/sla-report?month=${encodeURIComponent(month)}`, undefined, true),
+  getSLATrend: (months = 6) =>
+    request<ApiResponse<import('./types').SLATrendResponse>>('GET', `/admin/sla-report/trend?months=${months}`, undefined, true),
 
   // Admin - Profile
   getCurrentUser: () => request<ApiResponse<{ username: string }>>('GET', '/admin/current-user', undefined, true),
@@ -111,6 +117,9 @@ export const api = {
   // Admin - Notifications
   testEmail: (to: string) =>
     request<ApiResponse<void>>('POST', '/admin/test-email', { to }, true),
+  // 测试 webhook：使用已保存的设置发送一条测试消息
+  testWebhook: () =>
+    request<ApiResponse<void>>('POST', '/admin/test-webhook', undefined, true),
 
   // Admin - Logs
   getLogs: (page = 1, limit = 50, serviceId = 0, status = 'all') =>

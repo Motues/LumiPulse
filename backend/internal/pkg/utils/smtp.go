@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/smtp"
 	"strings"
+
+	"lumipluse-backend/internal/pkg/i18n"
 )
 
 func SendMail(to, subject, body string) error {
@@ -92,7 +94,7 @@ func buildStyledEmail(title, content string) string {
           </tr>
           <tr>
             <td style="padding:16px 32px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center">
-              LumiPulse &mdash; 服务监控系统
+              %s
             </td>
           </tr>
         </table>
@@ -100,7 +102,7 @@ func buildStyledEmail(title, content string) string {
     </tr>
   </table>
 </body>
-</html>`, title, content)
+</html>`, title, content, i18n.Current().EmailFooter())
 }
 
 func sendMailTLS(addr, user, pass, to string, msg []byte) error {

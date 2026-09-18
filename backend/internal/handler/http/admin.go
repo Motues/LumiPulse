@@ -2,8 +2,10 @@ package http
 
 import (
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/i18n"
 	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -184,10 +186,10 @@ func (h *Handler) GetSettings(c *gin.Context) {
 		"notify_services":          true,
 		"notify_emails":            true,
 		"show_admin_footer_button": true,
-			"sub_enable_email": true,
-			"sub_enable_rss": true,
-			"sub_enable_atom": true,
-		"custom_footer": true,
+		"sub_enable_email":         true,
+		"sub_enable_rss":           true,
+		"sub_enable_atom":          true,
+		"custom_footer":            true,
 	}
 
 	sensitiveKeys := map[string]bool{
@@ -235,10 +237,10 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		"notify_services":          true,
 		"notify_emails":            true,
 		"show_admin_footer_button": true,
-			"sub_enable_email": true,
-			"sub_enable_rss": true,
-			"sub_enable_atom": true,
-		"custom_footer": true,
+		"sub_enable_email":         true,
+		"sub_enable_rss":           true,
+		"sub_enable_atom":          true,
+		"custom_footer":            true,
 	}
 
 	var body map[string]string
@@ -301,20 +303,20 @@ func (h *Handler) TestEmail(c *gin.Context) {
 		return
 	}
 
-	subject := "LumiPulse 邮件通知"
+	lang := i18n.Current()
+	subject := lang.TestEmailSubject()
 	body := `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 16px"><tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)">
-<tr><td style="padding:32px 32px 0"><div style="font-size:20px;font-weight:700;color:#1a1a2e">LumiPulse 邮件通知</div></td></tr>
+<tr><td style="padding:32px 32px 0"><div style="font-size:20px;font-weight:700;color:#1a1a2e">` + subject + `</div></td></tr>
 <tr><td style="padding:16px 32px 32px;font-size:14px;line-height:1.7;color:#555">
-这是一封来自 LumiPulse 的测试邮件。<br><br>
-如果收到此邮件，说明您的 SMTP 配置正确。
+` + lang.TestEmailBody() + `
 </td></tr>
 <tr><td style="padding:16px 32px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center">
-LumiPulse &mdash; 服务监控系统
+` + lang.EmailFooter() + `
 </td></tr>
 </table>
 </td></tr></table>
@@ -331,5 +333,36 @@ LumiPulse &mdash; 服务监控系统
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "测试邮件发送成功",
+	})
+}
+
+// TestWebhook 发送一条测试 webhook，验证地址与签名配置是否可用。
+// 直接使用已保存的设置，因此前端需要先保存再测试（与测试邮件的行为一致）。
+func (h *Handler) TestWebhook(c *gin.Context) {
+	if utils.GetSetting("webhook_url") == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "webhook 地址未配置，请先保存配置"})
+		return
+	}
+
+	// 测试消息统一用 down 事件，便于接收端核对签名与字段格式
+	lang := i18n.Current()
+	evt := utils.WebhookEvent{
+		Event:   utils.WebhookEventDown,
+		Service: lang.TestWebhookService(),
+		URL:     "https://example.com/health",
+		Time:    time.Now().Format(time.RFC3339),
+		Message: lang.TestWebhookMessage(),
+	}
+
+	if err := utils.SendWebhookNow(evt); err != nil {
+		utils.Error("test webhook failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "发送失败: " + err.Error()})
+		return
+	}
+
+	utils.Info("test webhook sent")
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "测试 webhook 发送成功",
 	})
 }

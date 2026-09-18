@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '../api/client'
-import type { ServiceSummary } from '../api/types'
+import type { ServiceSummary, LatencyStats } from '../api/types'
 import ServiceMatrix from './ServiceMatrix.vue'
 import LatencyChart from './LatencyChart.vue'
+import { useI18n } from '../composables/useI18n'
 
 const props = defineProps<{
   service: ServiceSummary
@@ -14,16 +15,22 @@ const emit = defineEmits<{
   back: []
 }>()
 
+const { t } = useI18n()
+
 const latencies = ref<number[]>([])
 const statuses = ref<number[]>([])
 const startTime = ref('')
 const intervalMin = ref(5)
+const stats = ref<LatencyStats | null>(null)
 const loading = ref(true)
 
-const statusText: Record<string, string> = {
-  operational: '正常',
-  degraded: '异常',
-  outage: '故障',
+function statusText(status: string): string {
+  switch (status) {
+    case 'operational': return t('status.operational')
+    case 'degraded': return t('status.degraded')
+    case 'outage': return t('status.outage')
+    default: return status
+  }
 }
 
 const statusColors: Record<string, string> = {
@@ -34,14 +41,11 @@ const statusColors: Record<string, string> = {
 
 const hasData = computed(() => statuses.value.some(s => s !== -1))
 
-/** 图表概览：平均延迟 / 峰值 / 故障桶数量 */
+/** 图表概览：故障桶数量。延迟统计（平均 / P95 / P99 / 峰值）由后端在窗口内计算。 */
 const chartStats = computed(() => {
   const vals = latencies.value.filter((_, i) => statuses.value[i] !== -1)
   if (vals.length === 0) return null
-  const sum = vals.reduce((a, b) => a + b, 0)
   return {
-    avg: Math.round(sum / vals.length),
-    max: Math.max(...vals),
     failures: statuses.value.filter(s => s === 1).length,
   }
 })
@@ -51,19 +55,23 @@ async function loadLatency() {
   if (!hash) {
     latencies.value = []
     statuses.value = []
+    stats.value = null
     loading.value = false
     return
   }
   loading.value = true
+  stats.value = null
   try {
     const res = await api.getServiceLatency(hash, 1)
     latencies.value = res.data.latencies
     statuses.value = res.data.statuses
     startTime.value = res.data.start
     intervalMin.value = res.data.interval
+    stats.value = res.data.stats
   } catch {
     latencies.value = []
     statuses.value = []
+    stats.value = null
   } finally {
     loading.value = false
   }
@@ -79,7 +87,7 @@ watch(() => props.service.publicHash, loadLatency)
     <div class="flex items-center mb-4">
       <button @click="emit('back')" class="flex items-center gap-1.5 text-sm transition-colors text-[color:var(--text-color)] opacity-50 hover:opacity-80">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
-        返回列表
+        {{ t('common.backToStatus') }}
       </button>
     </div>
 
@@ -96,20 +104,20 @@ watch(() => props.service.publicHash, loadLatency)
           'text-[#df2d2a] dark:text-[#f87171]': service.status === 'outage',
         }">
           <div class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[service.status] }" />
-          {{ statusText[service.status] || service.status }}
+          {{ statusText(service.status) }}
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
         <div>
-          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">在线率</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.uptime') }}</div>
           <div class="font-medium" :class="service.uptime >= 99.9 ? 'text-emerald-600 dark:text-emerald-400' : ''" :style="service.uptime < 99.9 ? 'color: var(--text-color);' : ''">{{ service.uptime.toFixed(2) }}%</div>
         </div>
         <div>
-          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">响应时间</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.responseTime') }}</div>
           <div class="font-medium" style="color: var(--text-color);">{{ service.latency }}ms</div>
         </div>
         <div>
-          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">探测频率</div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.probeInterval') }}</div>
           <div class="font-medium" style="color: var(--text-color);">{{ service.interval }}s</div>
         </div>
       </div>
@@ -118,15 +126,33 @@ watch(() => props.service.publicHash, loadLatency)
     <!-- Latency chart -->
     <div class="rounded-lg p-6 mb-6" style="border: 1px solid var(--button-border-color);">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h3 class="font-bold" style="color: var(--text-color);">最近24小时延迟</h3>
+        <h3 class="font-bold" style="color: var(--text-color);">{{ t('service.latency24h') }}</h3>
         <div v-if="chartStats" class="flex items-center gap-3 text-xs" style="color: var(--text-color); opacity: 0.55;">
-          <span>平均 <span class="font-semibold" style="opacity: 0.9;">{{ chartStats.avg }}ms</span></span>
-          <span>峰值 <span class="font-semibold" style="opacity: 0.9;">{{ chartStats.max }}ms</span></span>
-          <span v-if="chartStats.failures > 0" class="text-[#df2d2a] dark:text-[#f87171]">故障 {{ chartStats.failures }} 次</span>
+          <span v-if="chartStats.failures > 0" class="text-[#df2d2a] dark:text-[#f87171]">{{ t('service.failures', { n: chartStats.failures }) }}</span>
+          <span v-if="stats">{{ t('service.latencySamples', { n: stats.samples }) }}</span>
         </div>
       </div>
-      <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
-      <div v-else-if="!hasData" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">暂无数据</div>
+      <!-- 分位数摘要：均值会被尖峰平均掉，p95/p99 用来暴露长尾 -->
+      <div v-if="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-5">
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.avgLatency') }}</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ Math.round(stats.avg) }}ms</div>
+        </div>
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.p95') }}</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ Math.round(stats.p95) }}ms</div>
+        </div>
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.p99') }}</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ Math.round(stats.p99) }}ms</div>
+        </div>
+        <div>
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.peak') }}</div>
+          <div class="font-medium" style="color: var(--text-color);">{{ stats.max }}ms</div>
+        </div>
+      </div>
+      <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
+      <div v-else-if="!hasData" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">{{ t('service.noData') }}</div>
       <LatencyChart
         v-else
         :latencies="latencies"
@@ -139,7 +165,7 @@ watch(() => props.service.publicHash, loadLatency)
 
     <!-- Service history matrix -->
     <div class="rounded-lg p-6" style="border: 1px solid var(--button-border-color);">
-      <h3 class="font-bold mb-4" style="color: var(--text-color);">服务历史</h3>
+      <h3 class="font-bold mb-4" style="color: var(--text-color);">{{ t('service.history') }}</h3>
       <ServiceMatrix :days="dailyDays" :uptime="service.uptime" />
     </div>
   </div>

@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# pnpm 本地生成（不同 pnpm 版本会重写，与项目源码无关）
+pnpm-workspace.yaml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

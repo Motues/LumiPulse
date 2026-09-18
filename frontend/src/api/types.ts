@@ -78,6 +78,16 @@ export interface Maintenance {
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
   affectedServices: string
   createdAt: string
+  /** 重复方式：'' = 一次性窗口，daily / weekly / monthly = 周期维护 */
+  recurrence: '' | 'daily' | 'weekly' | 'monthly'
+  /** 重复间隔，默认 1 */
+  recurrenceInterval: number
+  /** 仅 weekly：1=周一 … 7=周日（仅用于回显） */
+  recurrenceWeekday: number
+  /** 仅 monthly：1~31 */
+  recurrenceMonthday: number
+  /** 重复截止日期 YYYY-MM-DD，空值表示一直重复 */
+  recurrenceUntil: string
 }
 
 export interface SummaryResponse {
@@ -91,6 +101,25 @@ export interface ServiceHistoryResponse {
   service: Service
   uptime: number
   heartbeats: Heartbeat[]
+}
+
+/** 窗口内延迟分位数汇总（仅统计成功样本） */
+export interface LatencyStats {
+  samples: number
+  avg: number
+  p95: number
+  p99: number
+  max: number
+}
+
+/** 延迟分桶 + 分位数汇总响应 */
+export interface LatencyResponse {
+  start: string
+  interval: number
+  latencies: number[]
+  statuses: number[]
+  /** 窗口内无成功样本时为 null */
+  stats: LatencyStats | null
 }
 
 export interface DashboardStats {
@@ -139,6 +168,60 @@ export interface ServiceDailyStats {
 export interface BatchDailyStatsResponse {
   days: number
   services: ServiceDailyStats[]
+}
+
+/** 月度 SLA 报告：整站汇总 */
+export interface MonthlySLASummary {
+  uptime: number
+  totalProbes: number
+  downtimeProbes: number
+  incidents: number
+  /** 事件导致的累计不可用时长（秒） */
+  downtimeSeconds: number
+  avgLatency: number
+}
+
+/** 月度 SLA 报告：单服务 */
+export interface ServiceSLASummary {
+  serviceId: number
+  publicHash: string
+  name: string
+  uptime: number
+  totalProbes: number
+  downtimeProbes: number
+  incidents: number
+  downtimeSeconds: number
+  avgLatency: number
+  /** 该月内有探测数据的天数，0 表示数据缺失 */
+  coveredDays: number
+}
+
+/** 月度 SLA 报告 */
+export interface MonthlySLAReport {
+  /** YYYY-MM */
+  month: string
+  label: string
+  days: number
+  /** 月份已结束、数据已固化 */
+  final: boolean
+  summary: MonthlySLASummary
+  services: ServiceSLASummary[]
+}
+
+/** SLA 趋势中的一个月份 */
+export interface SLATrendPoint {
+  month: string
+  label: string
+  uptime: number
+  incidents: number
+  avgLatency: number
+  totalProbes: number
+}
+
+export interface SLATrendResponse {
+  months: SLATrendPoint[]
+  /** 每日明细保留天数，超出该范围的月份依赖已固化的月报 */
+  retainedDays: number
 }
 
 export interface ApiResponse<T = any> {

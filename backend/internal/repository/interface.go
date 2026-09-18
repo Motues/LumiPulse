@@ -21,6 +21,7 @@ type Repository interface {
 	GetLatestHeartbeat(ctx context.Context, serviceID int64) (*model.Heartbeat, error)
 	BatchGetLatestHeartbeats(ctx context.Context, serviceIDs []int64) (map[int64]*model.Heartbeat, error)
 	GetLatencyBuckets(ctx context.Context, serviceID int64, since string, bucketSeconds, maxBucket int) ([]*model.LatencyBucket, error)
+	GetLatencyStats(ctx context.Context, serviceID int64, since string) (*model.LatencyStats, error)
 	ListHeartbeats(ctx context.Context, serviceID int64, statusFilter string, page, limit int) ([]*model.LogEntry, int64, error)
 	DeleteOldHeartbeats(ctx context.Context, before string) error
 
@@ -30,6 +31,17 @@ type Repository interface {
 	GetServiceDailies(ctx context.Context, serviceID int64, days int) ([]*model.ServiceDaily, error)
 	BatchGetServiceDailies(ctx context.Context, serviceIDs []int64, days int) (map[int64][]*model.ServiceDaily, error)
 	DeleteOldServiceDailies(ctx context.Context, before string) error
+
+	// ServiceMonthly（月度 SLA 月报）
+	AggregateServiceMonthly(ctx context.Context, from, toExclusive string) ([]*model.ServiceMonthly, error)
+	ListServiceDailiesBetween(ctx context.Context, from, toExclusive string) (map[int64][]*model.ServiceDaily, error)
+	CountCoveredDaysBetween(ctx context.Context, from, toExclusive string) (map[int64]int, error)
+	AggregateIncidentDowntime(ctx context.Context, from, toExclusive string) (map[int64]int, error)
+	CountIncidentsBetween(ctx context.Context, from, toExclusive string) (map[int64]int, error)
+	GetServiceMonthly(ctx context.Context, serviceID int64, month string) (*model.ServiceMonthly, error)
+	ListServiceMonthlies(ctx context.Context, month string) ([]*model.ServiceMonthly, error)
+	UpsertServiceMonthly(ctx context.Context, m *model.ServiceMonthly, incremental bool) error
+	SetServiceMonthlyClosed(ctx context.Context, serviceID int64, month, closedAt string) error
 
 	// Incident
 	CreateIncident(ctx context.Context, inc *model.Incident) error

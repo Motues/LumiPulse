@@ -144,6 +144,23 @@ func InitSchema(db *sqlx.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_probe_service ON ProbeTask(service_id);
 	CREATE INDEX IF NOT EXISTS idx_probe_server ON ProbeTask(server_id);
+
+	-- 月度 SLA 汇总：ServiceDaily 会被 DAILY_RETENTION_DAYS 清理，
+	-- 月报需要长期留存，因此在月末把每日数据固化到这里（计算口径见 sla.go）。
+	CREATE TABLE IF NOT EXISTS ServiceMonthly (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		service_id INTEGER NOT NULL REFERENCES Service(id) ON DELETE CASCADE,
+		month TEXT NOT NULL,
+		uptime_count INTEGER DEFAULT 0,
+		downtime_count INTEGER DEFAULT 0,
+		total_latency INTEGER DEFAULT 0,
+		incident_total INTEGER DEFAULT 0,
+		incident_downtime_seconds INTEGER DEFAULT 0,
+		recorded_at DATETIME,
+		closed_at DATETIME,
+		UNIQUE(service_id, month)
+	);
+	CREATE INDEX IF NOT EXISTS idx_monthly_service_month ON ServiceMonthly(service_id, month);
 `
 
 	_, err := db.Exec(schema)
@@ -174,6 +191,12 @@ func InitSchema(db *sqlx.DB) error {
 		`ALTER TABLE Incident ADD COLUMN public_hash TEXT DEFAULT ''`,
 		`UPDATE Incident SET public_hash = lower(hex(randomblob(16))) WHERE public_hash IS NULL OR public_hash = ''`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_public_hash ON Incident(public_hash)`,
+		// 维护计划支持周期重复：recurrence 为空即为一次性窗口
+		`ALTER TABLE Maintenance ADD COLUMN recurrence TEXT DEFAULT ''`,
+		`ALTER TABLE Maintenance ADD COLUMN recurrence_interval INTEGER DEFAULT 1`,
+		`ALTER TABLE Maintenance ADD COLUMN recurrence_weekday INTEGER DEFAULT 0`,
+		`ALTER TABLE Maintenance ADD COLUMN recurrence_monthday INTEGER DEFAULT 0`,
+		`ALTER TABLE Maintenance ADD COLUMN recurrence_until TEXT DEFAULT ''`,
 	}
 	for _, m := range migrations {
 		db.Exec(m) // ignore errors (column may already exist)

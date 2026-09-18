@@ -380,11 +380,19 @@ func (h *Handler) aggregateLatency(c *gin.Context, serviceID int64, days int) mo
 		}
 	}
 
+	// 分位数汇总与分桶聚合共用同一时间窗口，前端可放在同一张卡片里对照
+	stats, err := h.Repo.GetLatencyStats(c.Request.Context(), serviceID,
+		startTime.Format("2006-01-02 15:04:05"))
+	if err != nil {
+		stats = nil
+	}
+
 	return model.LatencyResponse{
 		Start:     startTime.Format("2006-01-02T15:04:05Z"),
 		Interval:  bucketSize,
 		Latencies: latencies,
 		Statuses:  statuses,
+		Stats:     stats,
 	}
 }
 

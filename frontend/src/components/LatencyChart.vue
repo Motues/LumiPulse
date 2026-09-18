@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from '../composables/useI18n'
 
 const props = defineProps<{
   latencies: number[]
@@ -9,6 +10,8 @@ const props = defineProps<{
   /** 悬浮标记的描边色，需与所在卡片背景保持一致 */
   ringColor?: string
 }>()
+
+const { t } = useI18n()
 
 const hoverIndex = ref(-1)
 const pointCount = computed(() => props.latencies.length)
@@ -29,7 +32,12 @@ const uid = `lat-${Math.random().toString(36).slice(2, 8)}`
 
 // 状态：-1=无数据，0=正常，1=故障
 const LINE_COLORS: Record<number, string> = { 0: '#34a761', 1: '#df2d2a', '-1': '#9ca3af' }
-const STATUS_LABELS: Record<number, string> = { 0: '正常', 1: '故障', '-1': '无数据' }
+/** 状态文案走 i18n，切换语言时随模板一起更新 */
+function statusLabel(status: number): string {
+  if (status === 0) return t('chart.normal')
+  if (status === 1) return t('chart.failure')
+  return t('chart.noData')
+}
 const GRADIENT_STOPS: { status: number; color: string }[] = [
   { status: 0, color: '#34a761' },
   { status: 1, color: '#df2d2a' },
@@ -233,8 +241,8 @@ const hover = computed(() => {
   return {
     x, y, hasData, color,
     time: labelAt(i),
-    label: hasData ? `${props.latencies[i]}ms` : '无数据',
-    statusLabel: STATUS_LABELS[st] || '',
+    label: hasData ? `${props.latencies[i]}ms` : t('service.noData'),
+    statusLabel: statusLabel(st),
     box: { x: tx - boxW / 2, y: bottom - boxH, w: boxW, h: boxH },
     stemY: above ? bottom : bottom - boxH,
   }
@@ -336,9 +344,9 @@ function onMouseMove(e: MouseEvent) {
     </div>
 
     <div class="flex items-center justify-center gap-4 mt-3 text-xs" style="color: var(--text-color); opacity: 0.45;">
-      <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-[#34a761]"></span>正常</span>
-      <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-[#df2d2a]"></span>故障</span>
-      <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-gray-400"></span>无数据</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-[#34a761]"></span>{{ t('chart.normal') }}</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-[#df2d2a]"></span>{{ t('chart.failure') }}</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-gray-400"></span>{{ t('chart.noData') }}</span>
     </div>
   </div>
 </template>
