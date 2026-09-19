@@ -5,6 +5,7 @@ import TopBar from '../components/dashboard/TopBar.vue'
 import Toast from '../components/dashboard/Toast.vue'
 import DashboardHome from '../components/dashboard/DashboardHome.vue'
 import ServiceManager from '../components/dashboard/ServiceManager.vue'
+import ServiceFolderManager from '../components/dashboard/ServiceFolderManager.vue'
 import IncidentManager from '../components/dashboard/IncidentManager.vue'
 import MaintenanceManager from '../components/dashboard/MaintenanceManager.vue'
 import SettingsPanel from '../components/dashboard/SettingsPanel.vue'
@@ -15,8 +16,11 @@ import ApiKeyManager from '../components/dashboard/ApiKeyManager.vue'
 import SubscriberManager from '../components/dashboard/SubscriberManager.vue'
 import ProbeManager from '../components/dashboard/ProbeManager.vue'
 import SLAReport from '../components/dashboard/SLAReport.vue'
+import { useI18n } from '../composables/useI18n'
 
-type Section = 'dashboard' | 'services' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'sla' | 'users' | 'subscribers' | 'notifications' | 'settings' | 'api-keys'
+const { t } = useI18n()
+
+type Section = 'dashboard' | 'services' | 'service-folders' | 'probes' | 'logs' | 'incidents' | 'maintenances' | 'sla' | 'users' | 'subscribers' | 'notifications' | 'settings' | 'api-keys'
 const activeSection = ref<Section>('dashboard')
 const pendingServiceId = ref<number | undefined>()
 const sidebarCollapsed = ref(false)
@@ -39,43 +43,45 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
 })
 
-const navGroups = [
+/** 侧边栏导航。用 computed 生成，语言切换时标题与各项文案一起更新。 */
+const navGroups = computed(() => [
   {
     title: '',
     items: [
-      { id: 'dashboard' as Section, label: '控制台', icon: 'M3 3h18v18H3V3z M3 9h18 M9 21V9' },
+      { id: 'dashboard' as Section, label: t('admin.nav.dashboard'), icon: 'M3 3h18v18H3V3z M3 9h18 M9 21V9' },
     ],
   },
   {
-    title: '监控管理',
+    title: t('admin.nav.groupMonitoring'),
     items: [
-      { id: 'services' as Section, label: '服务管理', icon: 'M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z M8 3v18' },
-      { id: 'probes' as Section, label: '探测任务', icon: 'M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z M12 6a6 6 0 016 6 6 6 0 01-6 6 6 6 0 01-6-6 6 6 0 016-6z' },
-      { id: 'logs' as Section, label: '监控日志', icon: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8' },
-      { id: 'sla' as Section, label: 'SLA 报告', icon: 'M9 17V9m4 8V5m4 12v-5M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z' },
+      { id: 'services' as Section, label: t('admin.nav.services'), icon: 'M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z M8 3v18' },
+      { id: 'service-folders' as Section, label: t('admin.nav.serviceFolders'), icon: 'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z' },
+      { id: 'probes' as Section, label: t('admin.nav.probes'), icon: 'M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z M12 6a6 6 0 016 6 6 6 0 01-6 6 6 6 0 01-6-6 6 6 0 016-6z' },
+      { id: 'logs' as Section, label: t('admin.nav.logs'), icon: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8' },
+      { id: 'sla' as Section, label: t('admin.nav.sla'), icon: 'M9 17V9m4 8V5m4 12v-5M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z' },
     ],
   },
   {
-    title: '事件与维护',
+    title: t('admin.nav.groupIncidents'),
     items: [
-      { id: 'incidents' as Section, label: '事件管理', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9' },
-      { id: 'maintenances' as Section, label: '维护计划', icon: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z' },
+      { id: 'incidents' as Section, label: t('admin.nav.incidents'), icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9' },
+      { id: 'maintenances' as Section, label: t('admin.nav.maintenances'), icon: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z' },
     ],
   },
   {
-    title: '系统管理',
+    title: t('admin.nav.groupSystem'),
     items: [
-      { id: 'users' as Section, label: '用户管理', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
-      { id: 'notifications' as Section, label: '通知管理', icon: 'M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 01-3.46 0' },
-      { id: 'settings' as Section, label: '系统设置', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
-      { id: 'api-keys' as Section, label: 'API密钥', icon: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4' },
-      { id: 'subscribers' as Section, label: '订阅管理', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+      { id: 'users' as Section, label: t('admin.nav.users'), icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
+      { id: 'notifications' as Section, label: t('admin.nav.notifications'), icon: 'M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 01-3.46 0' },
+      { id: 'settings' as Section, label: t('admin.nav.settings'), icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
+      { id: 'api-keys' as Section, label: t('admin.nav.apiKeys'), icon: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4' },
+      { id: 'subscribers' as Section, label: t('admin.nav.subscribers'), icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
     ],
   },
-]
+])
 
 const pageTitle = computed(() => {
-  for (const group of navGroups) {
+  for (const group of navGroups.value) {
     const item = group.items.find(i => i.id === activeSection.value)
     if (item) return item.label
   }
@@ -122,6 +128,7 @@ function switchSection(s: string, serviceId?: number) {
           @navigate="switchSection"
         />
         <ServiceManager v-else-if="activeSection === 'services'" :pending-service-id="pendingServiceId" @opened="pendingServiceId = undefined" />
+        <ServiceFolderManager v-else-if="activeSection === 'service-folders'" />
         <IncidentManager v-else-if="activeSection === 'incidents'" />
         <MaintenanceManager v-else-if="activeSection === 'maintenances'" />
         <SettingsPanel v-else-if="activeSection === 'settings'" />

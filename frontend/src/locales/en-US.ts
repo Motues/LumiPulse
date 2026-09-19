@@ -42,6 +42,9 @@ export const enUS: Record<string, string> = {
   'home.invalidIncident': 'Invalid incident identifier',
   'home.loadIncidentFailed': 'Failed to load incident details',
   'home.serviceLabel': 'Service #{id}',
+  'home.folderExpand': 'Expand services in this group',
+  'home.folderCollapse': 'Collapse and show the aggregated result only',
+  'home.folderServiceCount': '{n} services',
   'home.poweredBy': 'Powered By LumiPulse',
 
   // Service status
@@ -64,6 +67,10 @@ export const enUS: Record<string, string> = {
   'incident.impact.minor': 'Minor',
   'incident.impact.major': 'Major',
   'incident.impact.critical': 'Critical',
+  'incident.postmortem': 'Postmortem',
+  'incident.rootCause': 'Root cause',
+  'incident.resolution': 'Resolution',
+  'incident.postmortemDoc': 'View postmortem document',
 
   // Service detail
   'service.uptime': 'Uptime',
@@ -79,6 +86,18 @@ export const enUS: Record<string, string> = {
   'service.noData': 'No data yet',
   'service.history': 'Service history',
   'service.maintenanceOngoing': 'Under maintenance',
+  'service.certExpiry': 'Certificate expiry',
+  'service.certRemaining': '{n} days left',
+  'service.certExpired': 'Expired',
+  'service.heatmap': 'Response time heatmap',
+  'service.heatmapHint': 'Average response time by date and hour; the redder the cell, the slower. A red dot marks an hour with failed probes.',
+  'service.heatmapAvg': 'Avg response',
+  'service.heatmapSamples': 'Samples',
+  'service.heatmapFailures': 'Failures',
+  'service.heatmapNoData': 'No data',
+  'service.heatmapAllFailed': 'All failed',
+  'service.heatmapFast': 'Fast',
+  'service.heatmapSlow': 'Slow',
 
   // Latency chart
   'chart.normal': 'Operational',
@@ -101,6 +120,22 @@ export const enUS: Record<string, string> = {
   'subscribe.emptyMeansAll': 'Leave empty to subscribe to all services',
   'subscribe.feedDesc': 'Copy the link below into your RSS reader to follow status updates.',
   'subscribe.copied': 'Link copied to clipboard',
+
+  // Unsubscribe / preference management
+  'unsubscribe.title': 'Subscription',
+  'unsubscribe.subtitle': 'Email: {email}',
+  'unsubscribe.preferences': 'Preferences',
+  'unsubscribe.preferencesHint': 'Choose which services to be notified about; "All services" includes services added later.',
+  'unsubscribe.allServices': 'All services',
+  'unsubscribe.someServices': 'Selected services only',
+  'unsubscribe.noServices': 'No services available',
+  'unsubscribe.save': 'Save preferences',
+  'unsubscribe.saved': 'Your preferences have been updated.',
+  'unsubscribe.action': 'Unsubscribe from all',
+  'unsubscribe.confirm': 'Unsubscribe? You will no longer receive any status notifications.',
+  'unsubscribe.doneUnsubscribed': 'Unsubscribed',
+  'unsubscribe.doneUnsubscribedHint': 'You will no longer receive status notifications. You can subscribe again from the status page.',
+  'unsubscribe.invalidLink': 'This unsubscribe link is invalid or expired. Please use the link in your email again.',
 
   // Duration
   'duration.minutes': '{n}m',

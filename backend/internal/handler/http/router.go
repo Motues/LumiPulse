@@ -9,6 +9,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", h.Health)
+		// readiness：会检查数据库连通性，供容器编排与负载均衡使用
+		v1.GET("/ready", h.Ready)
 		v1.GET("/summary", h.GetSummary)
 		v1.GET("/services", h.ListServices)
 		// 批量每日统计：首页一次性取回所有服务的状态矩阵，避免 N+1 请求
@@ -16,6 +18,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 		// 公开服务接口一律用随机 hash 定位，不暴露自增 ID
 		v1.GET("/services/:hash/history", h.GetServiceHistory)
 		v1.GET("/services/:hash/latency", h.GetServiceLatency)
+		// 响应时间热力图：按「日期 × 小时」聚合，直接在 SQL 里完成
+		v1.GET("/services/:hash/latency-heatmap", h.GetServiceLatencyHeatmap)
 		v1.GET("/services/:hash/daily-stats", h.GetDailyStats)
 		v1.GET("/incidents", h.ListIncidents)
 		// 公开详情使用随机 hash 访问，不暴露自增 ID
@@ -23,6 +27,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 		v1.GET("/maintenances", h.ListMaintenances)
 		v1.GET("/site-config", h.GetSiteConfig)
 		v1.POST("/subscribe", h.Subscribe)
+		// 订阅者自助管理：邮箱 + 签名令牌（见 subscriber.go），无需登录
+		v1.GET("/subscription", h.GetSubscription)
+		v1.PUT("/subscription", h.UpdateSubscription)
+		v1.DELETE("/subscription", h.Unsubscribe)
 	}
 
 	// Feed routes at root level
@@ -32,6 +40,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 	// 爬虫文件：站点名与可收录 URL 都是运行时数据，必须动态生成
 	r.GET("/robots.txt", h.GetRobotsTxt)
 	r.GET("/sitemap.xml", h.GetSitemap)
+
+	// 对外状态徽章：/badge/<publicHash>.svg，无需鉴权，可长缓存
+	r.GET("/badge/:file", h.GetStatusBadge)
 
 	// Admin API
 	admin := r.Group("/api/v1/admin")
@@ -90,6 +101,14 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 			auth.POST("/servers", h.CreateServer)
 			auth.PUT("/servers/:id", h.UpdateServer)
 			auth.DELETE("/servers/:id", h.DeleteServer)
+
+			// Service folders（服务分组 / 服务聚合文件夹）
+			auth.GET("/service-folders", h.AdminListServiceFolders)
+			auth.GET("/service-folders/summary", h.AdminFolderSummaries)
+			auth.POST("/service-folders", h.CreateServiceFolder)
+			auth.PUT("/service-folders/:id", h.UpdateServiceFolder)
+			auth.DELETE("/service-folders/:id", h.DeleteServiceFolder)
+			auth.PUT("/services/:id/folder", h.AssignServiceFolder)
 
 			// Probe Tasks
 			auth.GET("/probe-tasks", h.ListProbeTasks)

@@ -1,4 +1,5 @@
 import type { ApiResponse } from './types'
+import { t } from '../composables/useI18n'
 
 const BASE = '/api/v1'
 
@@ -37,21 +38,21 @@ async function request<T>(
   // 直接 res.json() 会抛出难以理解的解析错误，这里统一转成友好提示。
   const raw = await res.text()
   if (!raw) {
-    throw new Error(res.ok ? '服务返回了空响应' : `请求失败 (${res.status})`)
+    throw new Error(res.ok ? t('common.emptyResponse') : t('common.requestFailedWithStatus', { status: res.status }))
   }
 
   let json: any
   try {
     json = JSON.parse(raw)
   } catch {
-    throw new Error(`服务返回了非预期内容 (${res.status})`)
+    throw new Error(t('common.unexpectedResponse'))
   }
 
   if (typeof json?.code === 'number' && json.code >= 400) {
-    throw new Error(json.message || 'Request failed')
+    throw new Error(json.message || t('common.requestFailed'))
   }
   if (!res.ok) {
-    throw new Error(json?.message || `请求失败 (${res.status})`)
+    throw new Error(json?.message || t('common.requestFailedWithStatus', { status: res.status }))
   }
   return json as T
 }
@@ -64,6 +65,9 @@ export const api = {
     request<ApiResponse<import('./types').ServiceHistoryResponse>>('GET', `/services/${encodeURIComponent(hash)}/history?days=${days}`),
   getServiceLatency: (hash: string, days = 1) =>
     request<ApiResponse<import('./types').LatencyResponse>>('GET', `/services/${encodeURIComponent(hash)}/latency?days=${days}`),
+  // 响应时间热力图：后端在 SQL 里按「日期 × 小时」聚合，避免下发 7 天的原始分桶
+  getServiceLatencyHeatmap: (hash: string, days = 7) =>
+    request<ApiResponse<import('./types').LatencyHeatmapResponse>>('GET', `/services/${encodeURIComponent(hash)}/latency-heatmap?days=${days}`),
   getPublicIncidents: (page = 1, limit = 20) =>
     request<ApiResponse<{ incidents: import('./types').Incident[]; pagination: import('./types').Pagination }>>('GET', `/incidents?page=${page}&limit=${limit}`),
   // 公开事件详情使用随机 hash 访问，不暴露数据库自增 ID
@@ -83,6 +87,13 @@ export const api = {
   // Public subscription
   subscribe: (email: string, services?: number[]) =>
     request<ApiResponse<void>>('POST', '/subscribe', services ? { email, services } : { email }),
+  // 订阅者自助管理：邮箱 + 签名令牌（令牌来自邮件里的链接）
+  getSubscription: (email: string, token: string) =>
+    request<ApiResponse<import('./types').SubscriptionView>>('GET', `/subscription?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`),
+  updateSubscription: (email: string, token: string, services: number[]) =>
+    request<ApiResponse<void>>('PUT', '/subscription', { email, token, services }),
+  unsubscribe: (email: string, token: string) =>
+    request<ApiResponse<void>>('DELETE', `/subscription?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`),
 
   // Auth
   login: (username: string, password: string) =>
@@ -156,11 +167,11 @@ export const api = {
   // Admin - ApiKeys
   getApiKeys: () =>
     request<ApiResponse<import('./types').ApiKey[]>>('GET', '/admin/api-keys', undefined, true),
-  createApiKey: (data: { name: string; expiresAt: string }) =>
+  createApiKey: (data: { name: string; expiresAt: string; scope?: string; rateLimitPerMinute?: number }) =>
     request<ApiResponse<import('./types').ApiKeyCreated>>('POST', '/admin/api-keys', data, true),
   deleteApiKey: (id: number) =>
     request<ApiResponse<void>>('DELETE', `/admin/api-keys/${id}`, undefined, true),
-  updateApiKey: (id: number, data: { name: string }) =>
+  updateApiKey: (id: number, data: { name: string; scope?: string; rateLimitPerMinute?: number }) =>
     request<ApiResponse<void>>('PUT', `/admin/api-keys/${id}`, data, true),
 
   // Admin - Maintenances
@@ -182,6 +193,22 @@ export const api = {
     request<ApiResponse<import('./types').Server>>('PUT', `/admin/servers/${id}`, data, true),
   deleteServer: (id: number) =>
     request<ApiResponse<void>>('DELETE', `/admin/servers/${id}`, undefined, true),
+
+  // Admin - Service folders（服务分组 / 服务聚合文件夹）
+  getServiceFolders: () =>
+    request<ApiResponse<import('./types').ServiceFolder[]>>('GET', '/admin/service-folders', undefined, true),
+  /** 全部分组的融合结果（含未在首页展示的分组），口径与公开首页一致 */
+  getFolderSummaries: () =>
+    request<ApiResponse<import('./types').FolderSummary[]>>('GET', '/admin/service-folders/summary', undefined, true),
+  createServiceFolder: (data: { name: string; description?: string; showOnHomepage?: boolean; sortOrder?: number }) =>
+    request<ApiResponse<import('./types').ServiceFolder>>('POST', '/admin/service-folders', data, true),
+  updateServiceFolder: (id: number, data: { name?: string; description?: string; showOnHomepage?: boolean; sortOrder?: number }) =>
+    request<ApiResponse<import('./types').ServiceFolder>>('PUT', `/admin/service-folders/${id}`, data, true),
+  deleteServiceFolder: (id: number) =>
+    request<ApiResponse<void>>('DELETE', `/admin/service-folders/${id}`, undefined, true),
+  /** 把服务移动到指定分组；folderId 传 0 表示取消分组 */
+  assignServiceFolder: (serviceId: number, folderId: number | null) =>
+    request<ApiResponse<void>>('PUT', `/admin/services/${serviceId}/folder`, { folderId }, true),
 
   // Admin - Probe Tasks
   getProbeTasks: () =>

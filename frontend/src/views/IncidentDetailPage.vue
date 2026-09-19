@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { Incident, ServiceSummary } from '../api/types'
@@ -29,6 +29,15 @@ function incidentStatusLabel(status: string): string {
   const label = t(key)
   return label === key ? status : label
 }
+
+/**
+ * 复盘区块只在后端确实返回了内容时展示。
+ * 未勾选「对外公开」的事件，后端会把这三个字段清空，因此这里天然不会渲染。
+ */
+const hasPostmortem = computed(() => {
+  const inc = incident.value
+  return !!(inc && (inc.rootCause || inc.resolution || inc.postmortemUrl))
+})
 
 onMounted(async () => {
   // 公开详情页使用随机 hash 访问，不再暴露自增 ID
@@ -136,6 +145,33 @@ onMounted(async () => {
           </ul>
         </div>
         <p v-else class="text-sm" style="color: var(--text-color); opacity: 0.4;">{{ t('home.noUpdates') }}</p>
+      </div>
+      <!-- Postmortem（仅当后端返回了公开的复盘内容时展示） -->
+      <div v-if="hasPostmortem" class="rounded-lg p-6 mt-6" style="border: 1px solid var(--button-border-color);">
+        <h2 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ t('incident.postmortem') }}</h2>
+        <div class="space-y-4 text-sm">
+          <div v-if="incident.rootCause">
+            <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('incident.rootCause') }}</div>
+            <p class="whitespace-pre-wrap leading-relaxed" style="color: var(--text-color); opacity: 0.8;">{{ incident.rootCause }}</p>
+          </div>
+          <div v-if="incident.resolution">
+            <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('incident.resolution') }}</div>
+            <p class="whitespace-pre-wrap leading-relaxed" style="color: var(--text-color); opacity: 0.8;">{{ incident.resolution }}</p>
+          </div>
+          <div v-if="incident.postmortemUrl">
+            <a
+              :href="incident.postmortemUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400 hover:opacity-80 transition-opacity"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+              {{ t('incident.postmortemDoc') }}
+            </a>
+          </div>
+        </div>
       </div>
     </template>
   </main>

@@ -1,0 +1,31 @@
+# 统一换行符：仓库内所有文本文件一律以 LF 存储。
+# 此前 core.autocrlf=true 让部分文件在 HEAD 里带 CRLF，gofmt -l 因此长期有输出。
+* text=auto eol=lf
+
+# 二进制文件不做换行符转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.gz binary
+
+# 这些文件必须保持 CRLF（Windows 批处理对 LF 敏感）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 明确按 LF 处理的文本类型
+*.go text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

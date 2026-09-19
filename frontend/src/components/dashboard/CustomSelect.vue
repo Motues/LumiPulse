@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from '../../composables/useI18n'
 
 const props = defineProps<{
   modelValue: string
@@ -12,12 +13,14 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
+const { t } = useI18n()
+
 const open = ref(false)
 const container = ref<HTMLElement | null>(null)
 
 const displayText = computed(() => {
   const found = props.options.find(o => o.value === props.modelValue)
-  return found ? found.label : (props.placeholder || '请选择')
+  return found ? found.label : (props.placeholder || t('admin.select.placeholder'))
 })
 
 const triggerStyle = computed(() => {

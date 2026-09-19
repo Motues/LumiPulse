@@ -10,11 +10,11 @@ import (
 func (r *repo) CreateMaintenance(ctx context.Context, m *model.Maintenance) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	query := `INSERT INTO Maintenance (title, description, scheduled_start, scheduled_end, status, affected_services,
-	             recurrence, recurrence_interval, recurrence_weekday, recurrence_monthday, recurrence_until, created_at)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	             recurrence, recurrence_interval, recurrence_weekday, recurrence_monthday, recurrence_until, reminded, created_at)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	res, err := r.db.ExecContext(ctx, query, m.Title, m.Description, m.ScheduledStart, m.ScheduledEnd, m.Status,
 		m.AffectedServices, m.Recurrence, m.RecurrenceInterval, m.RecurrenceWeekday, m.RecurrenceMonthday,
-		m.RecurrenceUntil, now)
+		m.RecurrenceUntil, m.Reminded, now)
 	if err != nil {
 		return err
 	}
@@ -56,11 +56,11 @@ func (r *repo) GetMaintenance(ctx context.Context, id int64) (*model.Maintenance
 
 func (r *repo) UpdateMaintenance(ctx context.Context, m *model.Maintenance) error {
 	query := `UPDATE Maintenance SET title=?, description=?, scheduled_start=?, scheduled_end=?, status=?, affected_services=?,
-	             recurrence=?, recurrence_interval=?, recurrence_weekday=?, recurrence_monthday=?, recurrence_until=?
+	             recurrence=?, recurrence_interval=?, recurrence_weekday=?, recurrence_monthday=?, recurrence_until=?, reminded=?
 			  WHERE id=?`
 	_, err := r.db.ExecContext(ctx, query, m.Title, m.Description, m.ScheduledStart, m.ScheduledEnd, m.Status,
 		m.AffectedServices, m.Recurrence, m.RecurrenceInterval, m.RecurrenceWeekday, m.RecurrenceMonthday,
-		m.RecurrenceUntil, m.ID)
+		m.RecurrenceUntil, m.Reminded, m.ID)
 	return err
 }
 

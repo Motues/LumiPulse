@@ -3,8 +3,11 @@ import { ref, computed, onMounted } from 'vue'
 import { api } from '../../api/client'
 import type { MonthlySLAReport, SLATrendPoint } from '../../api/types'
 import { useToast } from '../../composables/useToast'
+import { useI18n } from '../../composables/useI18n'
+import DateTimePicker from './DateTimePicker.vue'
 
 const { show: toast } = useToast()
+const { t } = useI18n()
 
 const report = ref<MonthlySLAReport | null>(null)
 const trend = ref<SLATrendPoint[]>([])
@@ -35,7 +38,7 @@ async function loadReport() {
     const res = await api.getSLAReport(month.value)
     report.value = res.data
   } catch (e: any) {
-    toast(e.message || '加载失败')
+    toast(e.message || t('admin.sla.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -78,11 +81,11 @@ function uptimeClass(uptime: number, covered: number): string {
 
 function formatDuration(seconds: number): string {
   if (!seconds || seconds <= 0) return '—'
-  if (seconds < 60) return `${Math.round(seconds)} 秒`
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
+  if (seconds < 60) return t('admin.sla.seconds', { n: Math.round(seconds) })
+  if (seconds < 3600) return t('admin.sla.minutes', { n: Math.round(seconds / 60) })
   const hours = seconds / 3600
-  if (hours < 24) return `${hours.toFixed(1)} 小时`
-  return `${(hours / 24).toFixed(1)} 天`
+  if (hours < 24) return t('admin.sla.hours', { n: hours.toFixed(1) })
+  return t('admin.sla.days', { n: (hours / 24).toFixed(1) })
 }
 
 const trendMaxIncidents = computed(() => Math.max(1, ...trend.value.map(t => t.incidents)))
@@ -100,56 +103,57 @@ onMounted(async () => {
         <button
           @click="stepMonth(-1)"
           class="px-2.5 py-1.5 rounded-lg text-sm transition-colors btn-cancel"
-          title="上一月"
+          :title="t('admin.sla.prevMonth')"
         >&lsaquo;</button>
-        <input
+        <DateTimePicker
           v-model="month"
-          type="month"
+          mode="month"
           :max="currentMonthKey()"
-          @change="onMonthChange"
-          class="px-3 py-1.5 rounded-lg text-sm input-field"
+          :placeholder="t('admin.sla.selectMonth')"
+          class="w-[150px]"
+          @update:model-value="onMonthChange"
         />
         <button
           @click="stepMonth(1)"
           :disabled="isCurrentMonth"
           class="px-2.5 py-1.5 rounded-lg text-sm transition-colors btn-cancel"
           :style="isCurrentMonth ? { opacity: 0.3, cursor: 'not-allowed' } : {}"
-          title="下一月"
+          :title="t('admin.sla.nextMonth')"
         >&rsaquo;</button>
       </div>
       <div class="text-xs" style="color: var(--text-color); opacity: 0.45;">
-        每日明细保留 {{ retainedDays }} 天，更早的月份读取已固化的月报
+        {{ t('admin.sla.retainedHint', { days: retainedDays }) }}
       </div>
     </div>
 
-    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
 
     <template v-else-if="report">
       <!-- 汇总卡片 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 mb-6">
         <div class="rounded-xl p-4 md:p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">整站可用率</div>
+          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.sla.overallUptime') }}</div>
           <div class="text-2xl md:text-3xl font-bold" :class="uptimeClass(report.summary.uptime, report.summary.totalProbes)">
-            {{ report.summary.totalProbes > 0 ? report.summary.uptime.toFixed(3) + '%' : '无数据' }}
+            {{ report.summary.totalProbes > 0 ? report.summary.uptime.toFixed(3) + '%' : t('admin.sla.noData') }}
           </div>
           <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">
-            共 {{ report.summary.totalProbes }} 次探测
+            {{ t('admin.sla.totalProbes', { n: report.summary.totalProbes }) }}
           </div>
         </div>
         <div class="rounded-xl p-4 md:p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">故障事件</div>
+          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.sla.incidents') }}</div>
           <div class="text-2xl md:text-3xl font-bold" style="color: var(--text-color);">{{ report.summary.incidents }}</div>
           <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">
-            失败探测 {{ report.summary.downtimeProbes }} 次
+            {{ t('admin.sla.failedProbes', { n: report.summary.downtimeProbes }) }}
           </div>
         </div>
         <div class="rounded-xl p-4 md:p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">不可用时长</div>
+          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.sla.downtime') }}</div>
           <div class="text-2xl md:text-3xl font-bold" style="color: var(--text-color);">{{ formatDuration(report.summary.downtimeSeconds) }}</div>
-          <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">按事件起止时间统计</div>
+          <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.sla.downtimeHint') }}</div>
         </div>
         <div class="rounded-xl p-4 md:p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">平均响应</div>
+          <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.sla.avgResponse') }}</div>
           <div class="text-2xl md:text-3xl font-bold" style="color: var(--text-color);">
             {{ report.summary.totalProbes > 0 ? Math.round(report.summary.avgLatency) + 'ms' : '—' }}
           </div>
@@ -160,23 +164,23 @@ onMounted(async () => {
       <!-- 服务明细 -->
       <div class="rounded-xl mb-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
         <div class="flex items-center justify-between px-5 py-4" style="border-bottom: 1px solid var(--button-border-color);">
-          <h3 class="font-bold" style="color: var(--text-color);">服务可用率明细</h3>
+          <h3 class="font-bold" style="color: var(--text-color);">{{ t('admin.sla.serviceBreakdown') }}</h3>
           <span v-if="!report.final" class="text-xs px-2 py-0.5 rounded" style="color: var(--text-color); background-color: var(--button-hover-color);">
-            当月数据仍在累积
+            {{ t('admin.sla.accumulating') }}
           </span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-xs" style="color: var(--text-color); opacity: 0.45;">
-                <th class="text-left font-medium px-5 py-3">服务</th>
-                <th class="text-right font-medium px-5 py-3">可用率</th>
-                <th class="text-right font-medium px-5 py-3">探测次数</th>
-                <th class="text-right font-medium px-5 py-3">失败次数</th>
-                <th class="text-right font-medium px-5 py-3">事件</th>
-                <th class="text-right font-medium px-5 py-3">不可用时长</th>
-                <th class="text-right font-medium px-5 py-3">平均响应</th>
-                <th class="text-right font-medium px-5 py-3">覆盖天数</th>
+                <th class="text-left font-medium px-5 py-3">{{ t('admin.sla.colService') }}</th>
+                <th class="text-right font-medium px-5 py-3">{{ t('admin.sla.colUptime') }}</th>
+                <th class="text-right font-medium px-5 py-3">{{ t('admin.sla.colProbes') }}</th>
+                <th class="text-right font-medium px-5 py-3">{{ t('admin.sla.colFailures') }}</th>
+                <th class="text-right font-medium px-5 py-3">{{ t('admin.sla.colIncidents') }}</th>
+                <th class="text-right font-medium px-5 py-3">{{ t('admin.sla.colDowntime') }}</th>
+                <th class="text-right font-medium px-5 py-3">{{ t('admin.sla.colAvgResponse') }}</th>
+                <th class="text-right font-medium px-5 py-3">{{ t('admin.sla.colCoveredDays') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -187,7 +191,7 @@ onMounted(async () => {
               >
                 <td class="px-5 py-3 font-medium" style="color: var(--text-color);">{{ svc.name }}</td>
                 <td class="px-5 py-3 text-right font-medium" :class="uptimeClass(svc.uptime, svc.coveredDays)">
-                  {{ svc.coveredDays > 0 ? svc.uptime.toFixed(3) + '%' : '无数据' }}
+                  {{ svc.coveredDays > 0 ? svc.uptime.toFixed(3) + '%' : t('admin.sla.noData') }}
                 </td>
                 <td class="px-5 py-3 text-right" style="color: var(--text-color); opacity: 0.7;">{{ svc.totalProbes }}</td>
                 <td class="px-5 py-3 text-right" style="color: var(--text-color); opacity: 0.7;">{{ svc.downtimeProbes }}</td>
@@ -201,7 +205,7 @@ onMounted(async () => {
                 </td>
               </tr>
               <tr v-if="report.services.length === 0">
-                <td colspan="8" class="px-5 py-8 text-center" style="color: var(--text-color); opacity: 0.4;">该月没有服务数据</td>
+                <td colspan="8" class="px-5 py-8 text-center" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.sla.emptyMonth') }}</td>
               </tr>
             </tbody>
           </table>
@@ -210,9 +214,9 @@ onMounted(async () => {
 
       <!-- 趋势 -->
       <div class="rounded-xl p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-        <h3 class="font-bold mb-4" style="color: var(--text-color);">最近 6 个月趋势</h3>
-        <div v-if="trendLoading" class="text-center py-8" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
-        <div v-else-if="trend.length === 0" class="text-center py-8" style="color: var(--text-color); opacity: 0.4;">暂无数据</div>
+        <h3 class="font-bold mb-4" style="color: var(--text-color);">{{ t('admin.sla.trendTitle') }}</h3>
+        <div v-if="trendLoading" class="text-center py-8" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
+        <div v-else-if="trend.length === 0" class="text-center py-8" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.sla.noData') }}</div>
         <div v-else class="space-y-3">
           <button
             v-for="point in trend"
@@ -232,10 +236,10 @@ onMounted(async () => {
               />
             </span>
             <span class="w-24 text-right text-xs font-medium flex-shrink-0" :class="uptimeClass(point.uptime, point.totalProbes)">
-              {{ point.totalProbes > 0 ? point.uptime.toFixed(2) + '%' : '无数据' }}
+              {{ point.totalProbes > 0 ? point.uptime.toFixed(2) + '%' : t('admin.sla.noData') }}
             </span>
             <span class="w-20 text-right text-xs flex-shrink-0" style="color: var(--text-color); opacity: 0.45;">
-              事件 {{ point.incidents }}/{{ trendMaxIncidents }}
+              {{ t('admin.sla.trendIncidents', { n: point.incidents, max: trendMaxIncidents }) }}
             </span>
           </button>
         </div>

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"lumipluse-backend/internal/checker"
@@ -21,7 +23,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const Version = "0.1.9"
+const Version = "0.1.10"
 
 // sqliteDSN 构造带 pragma 的 SQLite 连接串。
 // 说明：busy_timeout / foreign_keys 是「每连接」设置，必须写进 DSN 才能对
@@ -81,13 +83,18 @@ func main() {
 	repo := sqlite.NewRepository(db)
 	handler := &h.Handler{Repo: repo, Version: Version}
 
+	// 收到 SIGINT / SIGTERM 时取消该 context，用来停机；
+	// 检查器与 HTTP 服务都挂在它上面，容器滚动更新时不会硬中断在途探测与写库。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Start health checker
-	hc := checker.New(repo, cfg.InsecureSkipVerify)
+	hc := checker.New(repo, cfg.InsecureSkipVerify, cfg.ProbeConcurrency())
 	// 检查器会自动创建/解决事件并改动服务状态，需要同步失效公开页缓存
 	hc.SetOnDataChange(handler.InvalidateSummary)
-	// 月报归档完成后，按设置发送上一个自然月的 SLA 报告邮件
-	hc.SetOnDailyMaintenance(handler.SendMonthlySLAReportIfDue)
-	hc.Start(context.Background())
+	// 每日收尾：按周期发送月报与周报邮件（各自自检触发条件）
+	hc.SetOnDailyMaintenance(handler.SendScheduledReportsIfDue)
+	hc.Start(ctx)
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -161,9 +168,31 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		utils.Fatal("服务器启动失败: %v", err)
+	// 在独立协程里监听：主协程等待退出信号，收到后先停止接受新连接、
+	// 等在途请求结束，再停掉检查器并关闭数据库。
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			utils.Fatal("服务器启动失败: %v", err)
+		}
+	case <-ctx.Done():
+		utils.Info("收到退出信号，开始停机")
 	}
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelShutdown()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		utils.Info("HTTP 服务停机超时: %v", err)
+	}
+
+	// 检查器可能正在探测或写库，等它自己收敛后再关闭连接
+	hc.Stop()
+	utils.Info("服务已退出")
 }
 
 // cacheControlMiddleware 为内容哈希的构建产物加上长缓存，index.html 保持不缓存。

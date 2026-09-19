@@ -17,11 +17,43 @@
 | `sort_order` | INTEGER | DEFAULT 0 | 前端展示排序权重 |
 | `show_on_homepage` | INTEGER | DEFAULT 1 | 是否在首页展示（1 为展示，0 为隐藏） |
 | `insecure_skip_verify` | INTEGER | DEFAULT 0 | 仅对该服务跳过 HTTPS 证书校验（1 为跳过，用于自签证书的内网服务） |
+| `timeout_seconds` | INTEGER | DEFAULT 10 | 单次探测超时（秒）。0 表示使用默认值 10 秒，生效范围 1~300 秒 |
+| `cert_expires_at` | TEXT | DEFAULT '' | HTTPS 证书到期时间（RFC3339，UTC）。由检查器在探测成功后写回，空值表示无证书信息 |
+| `cert_notify_level` | INTEGER | DEFAULT 0 | 已发送过的证书到期告警等级（0 / 30 / 7，单位：天）。只在等级变严重时通知一次，证书续期后重置为 0 |
 | `public_hash` | TEXT | UNIQUE, DEFAULT '' | 公开访问标识（32 位随机十六进制）。公开详情页用它替代自增 ID |
+| `http_method` | TEXT | DEFAULT '' | HTTP 探测请求方法，空值等价于 GET。支持 GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS |
+| `http_headers` | TEXT | DEFAULT '' | 自定义请求头，JSON 对象字符串（如 `{"Authorization":"Bearer xxx"}`）。**敏感信息**：管理端接口不回显原值 |
+| `http_body` | TEXT | DEFAULT '' | 请求体纯文本，配合 `POST`/`PUT` 的健康检查使用。**敏感信息**：管理端接口不回显原值 |
+| `expect_status` | TEXT | DEFAULT '' | 期望状态码模式，支持 `200` / `200,301` / `200-299` / `2xx` 组合（逗号分隔）。空值沿用默认判定 `200 ≤ status < 400` |
+| `expect_keyword` | TEXT | DEFAULT '' | 期望响应关键字。非空时响应体必须包含该字符串才算成功；空值表示不校验内容 |
+| `folder_id` | INTEGER | DEFAULT NULL | 所属服务分组 ID；空值表示未分组（在首页独立展示）。分组删除时置空，服务本身不受影响 |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
-索引：`idx_service_public_hash(public_hash)`（唯一）
+索引：`idx_service_public_hash(public_hash)`（唯一）、`idx_service_folder(folder_id)`
+
+> 探测成功判定 = 状态码符合 `expect_status`（或默认 200~399）**且**（若配置了）`message` 中包含 `expect_keyword`。
+> 检查器在写心跳时会把响应体片段（最多 200 字符）写进 `Heartbeat.message`，统计查询据此复核历史心跳，
+> 保证日志筛选、延迟分桶、热力图与分位数使用与探测时一致的判定口径。
+
+---
+
+## 表：`ServiceFolder`
+
+服务分组（服务聚合文件夹）。把多个服务聚合在一起，公开首页融合成一个条目展示；
+只影响展示口径，探测、事件与 SLA 统计仍然按服务计算。
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
+| `name` | TEXT | NOT NULL | 分组名称 |
+| `description` | TEXT | DEFAULT '' | 分组简述 |
+| `show_on_homepage` | INTEGER | DEFAULT 1 | 是否在公开首页展示。关闭后该分组及其下所有服务都不出现在公开首页 |
+| `sort_order` | INTEGER | DEFAULT 0 | 排序权重（升序，同值按 ID） |
+| `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
+| `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
+
+索引：`idx_service_folder_sort(sort_order, id)`
 
 ---
 
@@ -35,7 +67,7 @@
 | `service_id` | INTEGER | NOT NULL REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
 | `status` | INTEGER | NOT NULL | 状态码（如 200）或布尔值（1/0） |
 | `latency` | INTEGER | — | 响应延迟（单位：毫秒） |
-| `message` | TEXT | DEFAULT '' | 错误详情或响应摘要 |
+| `message` | TEXT | DEFAULT '' | 状态码 + 响应体片段（最多 200 字符）；判定失败时额外说明原因（不在期望状态码范围内 / 响应内容未包含期望关键字）。统计查询按该片段复核「期望关键字」 |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 检查时间 |
 
 索引：`idx_heartbeat_service_time(service_id, created_at)`
@@ -76,6 +108,15 @@
 | `affected_services` | TEXT | DEFAULT '' | 合并事件影响的额外服务 ID 列表（逗号分隔） |
 | `parent_id` | INTEGER | REFERENCES `Incident`(`id`) ON DELETE SET NULL | 父事件 ID（合并的子事件标识） |
 | `resolved_at` | DATETIME | DEFAULT NULL | 首次标记为已解决的时间（固定不变） |
+| `root_cause` | TEXT | DEFAULT '' | 事后复盘：根因描述 |
+| `resolution` | TEXT | DEFAULT '' | 事后复盘：处理措施 |
+| `postmortem_url` | TEXT | DEFAULT '' | 事后复盘：复盘文档链接 |
+| `postmortem_public` | INTEGER | DEFAULT 0 | 是否在公开页面展示上述复盘内容（1 为公开）；为 0 时公开接口会清空这三个字段 |
+| `acknowledged` | INTEGER | DEFAULT 0 | 是否已被人工确认。确认后不再发送告警升级通知 |
+| `acknowledged_at` | TEXT | DEFAULT '' | 确认时间（RFC3339）。公开接口会清空该字段 |
+| `acknowledged_by` | TEXT | DEFAULT '' | 确认人（管理员用户名）。公开接口会清空该字段 |
+| `escalation_count` | INTEGER | DEFAULT 0 | 已发送的告警升级通知次数 |
+| `last_escalated_at` | TEXT | DEFAULT '' | 上次升级通知时间（RFC3339）。取消确认时会一并重置 |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 事件开始时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
@@ -118,6 +159,7 @@
 | `recurrence_weekday` | INTEGER | DEFAULT 0 | 仅 `weekly`：1=周一 … 7=周日（仅用于回显，实际重复日期由 `scheduled_start` 的星期决定） |
 | `recurrence_monthday` | INTEGER | DEFAULT 0 | 仅 `monthly`：1~31，超出当月天数时取当月最后一天 |
 | `recurrence_until` | TEXT | DEFAULT '' | 重复截止日期（`YYYY-MM-DD`，含当天）；空值=一直重复 |
+| `reminded` | INTEGER | DEFAULT 0 | 「即将开始」提醒是否已发送（1 为已发送），保证每个维护窗口最多提醒一次 |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 
 索引：`idx_maintenance_status(status)`
@@ -125,6 +167,7 @@
 > 周期维护只保留「当前这次窗口 + 下一次窗口」：窗口结束后检查器把
 > `scheduled_start` / `scheduled_end` 推进到下一个窗口并将状态置回 `scheduled`，
 > 因此同一行的时间始终代表下一次（或正在进行）的维护窗口。
+> 推进窗口时会同时把 `reminded` 重置为 0，使每个窗口都能重新提醒。
 
 ---
 
@@ -163,7 +206,7 @@
 | --- | --- | --- | --- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
 | `email` | TEXT | UNIQUE NOT NULL | 订阅邮箱地址 |
-| `verified` | INTEGER | DEFAULT 0 | 是否已验证（1 为已验证，0 为未验证） |
+| `verified` | INTEGER | DEFAULT 0 | 订阅是否有效（1 为有效）。本项目不做双重确认，创建时即置 1；保留该列仅用于标识订阅状态 |
 | `subscribed_services` | TEXT | DEFAULT '' | 订阅的服务 ID 列表（逗号分隔，空=全部） |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 订阅时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
@@ -230,6 +273,8 @@
 | `last_used_at` | TEXT | DEFAULT '' | 最后使用时间 |
 | `last_used_ip` | TEXT | DEFAULT '' | 最后使用的 IP 地址 |
 | `is_active` | INTEGER | DEFAULT 1 | 是否启用（1 为启用，0 为禁用） |
+| `scope` | TEXT | DEFAULT 'read' | 权限范围：`read` 只允许 GET/HEAD，`write` 允许写操作；历史密钥迁移后为 `read` |
+| `rate_limit_per_minute` | INTEGER | DEFAULT 0 | 每分钟请求上限（0 = 不限制），超出返回 429 |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 
 索引：`idx_apikey_key(key)`

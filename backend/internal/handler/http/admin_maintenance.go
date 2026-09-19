@@ -132,6 +132,10 @@ func (h *Handler) UpdateMaintenance(c *gin.Context) {
 		m.Description = req.Description
 	}
 	if req.ScheduledStart != "" {
+		// 开始时间被改动后视为新的维护窗口，允许重新发送提前提醒
+		if req.ScheduledStart != m.ScheduledStart {
+			m.Reminded = false
+		}
 		m.ScheduledStart = req.ScheduledStart
 	}
 	if req.ScheduledEnd != "" {

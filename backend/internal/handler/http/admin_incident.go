@@ -3,10 +3,12 @@ package http
 import (
 	"fmt"
 	"lumipluse-backend/internal/model"
+	"lumipluse-backend/internal/pkg/i18n"
 	"lumipluse-backend/internal/pkg/utils"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -222,10 +224,55 @@ func (h *Handler) UpdateIncident(c *gin.Context) {
 		}
 	}
 
+	// 复盘字段：指针区分「未传」与「显式清空」，因此传空字符串也能把内容清掉
+	if req.RootCause != nil {
+		inc.RootCause = *req.RootCause
+	}
+	if req.Resolution != nil {
+		inc.Resolution = *req.Resolution
+	}
+	if req.PostmortemURL != nil {
+		inc.PostmortemURL = *req.PostmortemURL
+	}
+	if req.PostmortemPublic != nil {
+		inc.PostmortemPublic = *req.PostmortemPublic
+	}
+	// 人工确认：确认后不再发送升级通知。取消确认会重置升级计数，
+	// 让事件重新走一遍「未确认 → 升级」的流程（否则取消确认后不会再提醒）。
+	ackChanged := false
+	if req.Acknowledged != nil && *req.Acknowledged != inc.Acknowledged {
+		inc.Acknowledged = *req.Acknowledged
+		ackChanged = true
+		if inc.Acknowledged {
+			inc.AcknowledgedAt = time.Now().UTC().Format(time.RFC3339)
+			inc.AcknowledgedBy = adminName()
+		} else {
+			inc.AcknowledgedAt = ""
+			inc.AcknowledgedBy = ""
+			inc.EscalationCount = 0
+			inc.LastEscalatedAt = ""
+		}
+	}
+
 	if err := h.Repo.UpdateIncident(c.Request.Context(), inc); err != nil {
 		utils.Error("update incident %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to update incident"})
 		return
+	}
+
+	// 确认 / 取消确认都记一条时间线，便于回溯谁在什么时候接手
+	if ackChanged {
+		note := i18n.Current().IncidentAcknowledgedNote(inc.AcknowledgedBy)
+		if !inc.Acknowledged {
+			note = i18n.Current().IncidentUnacknowledgedNote()
+		}
+		if err := h.Repo.CreateIncidentUpdate(c.Request.Context(), &model.IncidentUpdate{
+			IncidentID: id,
+			Status:     "system",
+			Content:    note,
+		}); err != nil {
+			utils.Info("failed to record ack note for incident %d: %v", id, err)
+		}
 	}
 
 	// Sync status to child events

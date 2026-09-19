@@ -2,37 +2,30 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { siteName, siteIcon, subEnabledAny } from '../composables/useSiteConfig'
 import { useDarkMode } from '../composables/useDarkMode'
-import { useI18n, type Locale } from '../composables/useI18n'
+import { useI18n } from '../composables/useI18n'
 
 /**
- * 公开页顶部导航（首页与事件详情页共用），含主题切换与语言切换。
+ * 公开页顶部导航（首页与事件详情页共用），含主题切换。
  * 两处原本各有一份重复实现，抽出来同时解决 i18n 与后续维护问题。
+ * 语言切换只在页脚提供，顶部不再保留入口，避免同一功能出现两个入口。
  */
 defineProps<{
   onSubscribe: () => void
 }>()
 
 const { themeMode, setMode } = useDarkMode()
-const { locale, t, setLocale } = useI18n()
+const { t } = useI18n()
 
 const root = ref<HTMLElement | null>(null)
 const showThemeMenu = ref(false)
-const showLangMenu = ref(false)
 
 function toggleThemeMenu() {
-  showLangMenu.value = false
   showThemeMenu.value = !showThemeMenu.value
-}
-
-function toggleLangMenu() {
-  showThemeMenu.value = false
-  showLangMenu.value = !showLangMenu.value
 }
 
 function onDocumentClick(e: MouseEvent) {
   if (root.value && !root.value.contains(e.target as Node)) {
     showThemeMenu.value = false
-    showLangMenu.value = false
   }
 }
 
@@ -43,16 +36,6 @@ function pickTheme(mode: 'light' | 'dark' | 'system') {
   setMode(mode)
   showThemeMenu.value = false
 }
-
-function pickLocale(loc: Locale) {
-  setLocale(loc)
-  showLangMenu.value = false
-}
-
-const LANGUAGES: { value: Locale; label: string }[] = [
-  { value: 'zh-CN', label: '中文' },
-  { value: 'en-US', label: 'English' },
-]
 </script>
 
 <template>
@@ -65,36 +48,6 @@ const LANGUAGES: { value: Locale; label: string }[] = [
       </div>
       <div class="flex items-center gap-3">
         <a v-if="subEnabledAny" href="#" @click.prevent="onSubscribe" class="header-btn px-4 py-2 text-sm font-medium rounded-lg">{{ t('header.subscribe') }}</a>
-
-        <!-- 语言切换 -->
-        <div class="relative">
-          <button
-            @click.stop="toggleLangMenu"
-            class="header-btn px-2 py-2 rounded-lg flex items-center gap-1"
-            :title="t('header.language')"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.6">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 100-18 9 9 0 000 18zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
-            </svg>
-            <span class="text-xs font-medium">{{ locale === 'zh-CN' ? '中' : 'EN' }}</span>
-          </button>
-          <div
-            v-if="showLangMenu"
-            class="absolute right-0 top-full mt-2 rounded-lg shadow-lg py-1.5 px-1.5 z-50 flex flex-col gap-0.5"
-            :style="{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--button-border-color)', width: '130px' }"
-            @click.stop
-          >
-            <button
-              v-for="lang in LANGUAGES"
-              :key="lang.value"
-              @click="pickLocale(lang.value)"
-              class="w-full text-left px-3 py-2 text-sm transition-colors rounded-md"
-              :style="{ color: 'var(--text-color)', backgroundColor: locale === lang.value ? 'var(--button-hover-color)' : 'transparent' }"
-            >
-              {{ lang.label }}
-            </button>
-          </div>
-        </div>
 
         <!-- 主题切换 -->
         <div class="relative">

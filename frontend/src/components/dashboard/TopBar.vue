@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../../stores/auth'
 import { api } from '../../api/client'
+import { useI18n, type Locale } from '../../composables/useI18n'
 
 defineProps<{
   title: string
@@ -17,6 +18,13 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const { logout } = useAuth()
+const { locale, t, setLocale } = useI18n()
+
+/** 语言切换入口（管理后台没有设置页时唯一的切换点），语言名按当前语言展示 */
+const languages = computed<{ value: Locale; label: string }[]>(() => [
+  { value: 'zh-CN', label: t('admin.topbar.langZh') },
+  { value: 'en-US', label: t('admin.topbar.langEn') },
+])
 
 const username = ref('Admin')
 const isHovering = ref(false)
@@ -87,6 +95,26 @@ onMounted(async () => {
         </span>
       </button>
 
+      <!-- Language switcher -->
+      <div
+        class="flex items-center gap-0.5 rounded-lg p-0.5"
+        style="border: 1px solid var(--button-border-color);"
+      >
+        <button
+          v-for="lang in languages"
+          :key="lang.value"
+          type="button"
+          @click="setLocale(lang.value)"
+          class="px-2 py-1 text-xs rounded-md transition-colors"
+          :style="locale === lang.value
+            ? { backgroundColor: 'var(--button-hover-color)', color: 'var(--text-color)', fontWeight: 600 }
+            : { color: 'var(--text-color)', opacity: 0.5 }"
+          :title="t('header.language')"
+        >
+          {{ lang.label }}
+        </button>
+      </div>
+
       <div class="h-6 w-px" style="background-color: var(--button-border-color);" />
 
       <!-- User avatar with dropdown -->
@@ -99,7 +127,7 @@ onMounted(async () => {
           </div>
           <div class="flex-col text-left" :class="isMobile ? 'hidden' : 'flex'">
             <span class="text-sm font-bold leading-tight" style="color: var(--text-color);">{{ username }}</span>
-            <span class="text-[10px]" style="color: var(--text-color); opacity: 0.4;">管理员</span>
+            <span class="text-[10px]" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.topbar.role') }}</span>
           </div>
         </button>
 
@@ -113,14 +141,14 @@ onMounted(async () => {
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            用户管理
+            {{ t('admin.topbar.users') }}
           </button>
           <hr class="my-1" style="border-color: var(--button-border-color);" />
           <button @click="handleLogout" class="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 transition-colors text-left" @mouseenter="($event.target as HTMLElement).style.backgroundColor = 'var(--button-hover-color)'" @mouseleave="($event.target as HTMLElement).style.backgroundColor = 'transparent'">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
-            退出登录
+            {{ t('admin.topbar.logout') }}
           </button>
         </div>
       </div>

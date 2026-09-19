@@ -99,18 +99,23 @@ func (h *Handler) Setup(c *gin.Context) {
 	})
 }
 
-// GetCurrentAdmin 获取当前管理员信息
-func (h *Handler) GetCurrentAdmin(c *gin.Context) {
+// adminName 当前管理员的用户名（未设置时用默认名）。
+// 单管理员模型下无法按会话区分身份，这里统一作为「操作人」留痕使用。
+func adminName() string {
 	name := utils.GetSetting("admin_name")
 	if name == "" {
 		name = "lumi"
 	}
+	return name
+}
 
+// GetCurrentAdmin 获取当前管理员信息
+func (h *Handler) GetCurrentAdmin(c *gin.Context) {
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "ok",
 		Data: gin.H{
-			"username": name,
+			"username": adminName(),
 		},
 	})
 }
@@ -168,44 +173,96 @@ func (h *Handler) UpdateAdminProfile(c *gin.Context) {
 	})
 }
 
+// allowedSettingKeys 允许通过接口读写的设置项白名单。
+// 提成包级变量：GET / PUT 原本各有一份字面量，两边一旦不同步就会出现
+// 「读得到、存不回」的情况（通知页保存 webhook 配置时正是如此）。
+var allowedSettingKeys = map[string]bool{
+	"site_name":    true,
+	"site_icon":    true,
+	"admin_email":  true,
+	"admin_name":   true,
+	"allow_origin": true,
+	// 站点对外访问地址：用于邮件里的退订链接等绝对 URL
+	"site_url":        true,
+	"smtp_host":       true,
+	"smtp_port":       true,
+	"smtp_user":       true,
+	"smtp_pass":       true,
+	"smtp_encryption": true,
+	"email_enabled":   true,
+	"notify_services": true,
+	"notify_emails":   true,
+	// 告警静默：同服务冷却窗口 + 免打扰时段（见 checker/alert_policy.go）
+	"alert_cooldown_minutes": true,
+	"quiet_hours_start":      true,
+	"quiet_hours_end":        true,
+	// 告警升级：未确认的活跃事件超过时限后再次通知（见 checker/escalation.go）
+	"alert_escalation_enabled":        true,
+	"alert_escalation_minutes":        true,
+	"alert_escalation_repeat_minutes": true,
+	// 通知模板：留空使用内置中英文案（见 checker/notify_template.go）
+	"tpl_alert_subject":       true,
+	"tpl_alert_body":          true,
+	"tpl_resolved_subject":    true,
+	"tpl_resolved_body":       true,
+	"tpl_maintenance_subject": true,
+	"tpl_maintenance_body":    true,
+	"tpl_cert_subject":        true,
+	"tpl_cert_body":           true,
+	"tpl_escalation_subject":  true,
+	"tpl_escalation_body":     true,
+	// 报告邮件（月报见 sla_report.go，周报见 weekly_report.go）
+	"sla_report_enabled":       true,
+	"sla_report_emails":        true,
+	"sla_report_language":      true,
+	"weekly_report_enabled":    true,
+	"weekly_report_emails":     true,
+	"weekly_report_weekday":    true,
+	"show_admin_footer_button": true,
+	"sub_enable_email":         true,
+	"sub_enable_rss":           true,
+	"sub_enable_atom":          true,
+	"custom_footer":            true,
+	// Webhook 通知渠道
+	"webhook_enabled":          true,
+	"webhook_type":             true,
+	"webhook_url":              true,
+	"webhook_secret":           true,
+	"webhook_events":           true,
+	"webhook_telegram_chat_id": true,
+}
+
+// sensitiveSettingKeys 敏感设置项：读取时置空，写入时空值表示「保持不变」，
+// 避免前端只回显空值就把已保存的密钥/密码覆盖掉。
+var sensitiveSettingKeys = map[string]bool{
+	"admin_password": true,
+	"smtp_pass":      true,
+	"webhook_secret": true,
+}
+
+// readOnlySettingKeys 服务端自己维护的状态标记：可以在设置接口里读出来回显，
+// 但不接受写入（否则「上次发送时间」之类的去重标记会被前端整包提交覆盖）。
+var readOnlySettingKeys = map[string]bool{
+	"last_sla_report_month":   true,
+	"weekly_report_last_sent": true,
+}
+
 // GetSettings 获取系统设置
 func (h *Handler) GetSettings(c *gin.Context) {
 	all := utils.GetAllSettings()
 
-	allowedSettings := map[string]bool{
-		"site_name":                true,
-		"site_icon":                true,
-		"admin_email":              true,
-		"admin_name":               true,
-		"allow_origin":             true,
-		"smtp_host":                true,
-		"smtp_port":                true,
-		"smtp_user":                true,
-		"smtp_encryption":          true,
-		"email_enabled":            true,
-		"notify_services":          true,
-		"notify_emails":            true,
-		"show_admin_footer_button": true,
-		"sub_enable_email":         true,
-		"sub_enable_rss":           true,
-		"sub_enable_atom":          true,
-		"custom_footer":            true,
+	keys := make([]string, 0, len(allowedSettingKeys)+len(readOnlySettingKeys))
+	for k := range allowedSettingKeys {
+		keys = append(keys, k)
 	}
-
-	sensitiveKeys := map[string]bool{
-		"admin_password": true,
-		"smtp_pass":      true,
-	}
-
-	keys := make([]string, 0, len(allowedSettings))
-	for k := range allowedSettings {
+	for k := range readOnlySettingKeys {
 		keys = append(keys, k)
 	}
 
 	filtered := make(map[string]string)
 	for _, key := range keys {
 		if val, ok := all[key]; ok {
-			if sensitiveKeys[key] {
+			if sensitiveSettingKeys[key] {
 				filtered[key] = ""
 			} else {
 				filtered[key] = val
@@ -222,27 +279,6 @@ func (h *Handler) GetSettings(c *gin.Context) {
 
 // UpdateSettings 更新系统设置
 func (h *Handler) UpdateSettings(c *gin.Context) {
-	allowedSettings := map[string]bool{
-		"site_name":                true,
-		"site_icon":                true,
-		"admin_email":              true,
-		"admin_name":               true,
-		"allow_origin":             true,
-		"smtp_host":                true,
-		"smtp_port":                true,
-		"smtp_user":                true,
-		"smtp_pass":                true,
-		"smtp_encryption":          true,
-		"email_enabled":            true,
-		"notify_services":          true,
-		"notify_emails":            true,
-		"show_admin_footer_button": true,
-		"sub_enable_email":         true,
-		"sub_enable_rss":           true,
-		"sub_enable_atom":          true,
-		"custom_footer":            true,
-	}
-
 	var body map[string]string
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Invalid request body"})
@@ -250,7 +286,11 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	}
 
 	for key := range body {
-		if !allowedSettings[key] {
+		// 服务端状态标记允许出现在请求里（GET 会回显、前端整包提交），但不接受写入
+		if readOnlySettingKeys[key] {
+			continue
+		}
+		if !allowedSettingKeys[key] {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Setting \"" + key + "\" is not allowed"})
 			return
 		}
@@ -271,6 +311,10 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	}
 
 	for key, value := range body {
+		// 敏感项留空表示「不修改」：前端只回显空值，直接写入会把已保存的密码清掉
+		if sensitiveSettingKeys[key] && value == "" {
+			continue
+		}
 		if err := utils.SetSetting(key, value); err != nil {
 			utils.Error("Failed to update setting %s: %v", key, err)
 		}

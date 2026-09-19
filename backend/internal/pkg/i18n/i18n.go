@@ -132,8 +132,80 @@ func (l Lang) ResolvedSubject(service string) string {
 	return fmt.Sprintf(l.pick("服务恢复通知: %s", "Service recovered: %s"), service)
 }
 
-func (l Lang) ResolvedBody(service string) string {
-	return fmt.Sprintf(l.pick("服务 %s 已恢复运行。", "Service %s is back to normal."), service)
+// EscalationSubject / EscalationBody 告警升级通知（事件长时间未被确认）
+func (l Lang) EscalationSubject(title string) string {
+	return fmt.Sprintf(l.pick("【未确认】告警升级: %s", "[Unacknowledged] Escalation: %s"), title)
+}
+
+// EscalationBody 升级通知正文。unhandled 为可读的未处理时长，count 为第几次升级。
+func (l Lang) EscalationBody(title, unhandled string, count int) string {
+	if l.isZH() {
+		return fmt.Sprintf(
+			"故障事件「%s」已持续 %s 仍未被确认，特此升级提醒（第 %d 次），请尽快处理。",
+			title, unhandled, count,
+		)
+	}
+	return fmt.Sprintf(
+		"Incident \"%s\" has been unacknowledged for %s. Escalation #%d — please take action.",
+		title, unhandled, count,
+	)
+}
+
+// IncidentAcknowledgedNote 人工确认事件时的进展说明
+func (l Lang) IncidentAcknowledgedNote(by string) string {
+	if by == "" {
+		return l.pick("事件已被确认，正在处理中", "Incident acknowledged, handling in progress")
+	}
+	return fmt.Sprintf(l.pick("事件已被 %s 确认，正在处理中", "Incident acknowledged by %s"), by)
+}
+
+// IncidentUnacknowledgedNote 取消确认时的进展说明
+func (l Lang) IncidentUnacknowledgedNote() string {
+	return l.pick("事件已取消确认，恢复为待处理状态", "Incident acknowledgement removed, back to unhandled")
+}
+
+// ResolvedBody 恢复通知正文。duration 为可读时长（例如「3 分钟」），
+// 为空时退回不含时长的文案，保持向后兼容。
+func (l Lang) ResolvedBody(service, duration string) string {
+	if duration == "" {
+		return fmt.Sprintf(l.pick("服务 %s 已恢复运行。", "Service %s is back to normal."), service)
+	}
+	if l.isZH() {
+		return fmt.Sprintf("服务 %s 已恢复运行，本次不可用时长约 %s。", service, duration)
+	}
+	return fmt.Sprintf("Service %s is back to normal. Downtime: %s.", service, duration)
+}
+
+// MaintenanceUpcomingSubject / MaintenanceUpcomingBody 维护计划即将开始提醒
+func (l Lang) MaintenanceUpcomingSubject(title string) string {
+	return fmt.Sprintf(l.pick("维护提醒: %s", "Maintenance reminder: %s"), title)
+}
+
+// MaintenanceUpcomingBody 维护提醒正文。start 为可读的开始时间，countdown 为可读的剩余时长。
+func (l Lang) MaintenanceUpcomingBody(title, start, countdown string) string {
+	if l.isZH() {
+		return fmt.Sprintf("维护计划「%s」将于 %s 开始（约 %s 后），请提前做好准备。", title, start, countdown)
+	}
+	return fmt.Sprintf("Maintenance \"%s\" starts at %s (in about %s). Please prepare in advance.", title, start, countdown)
+}
+
+// CertExpiringSubject / CertExpiringBody HTTPS 证书即将到期提醒
+func (l Lang) CertExpiringSubject(service string) string {
+	return fmt.Sprintf(l.pick("证书即将到期: %s", "Certificate expiring: %s"), service)
+}
+
+// CertExpiringBody 证书提醒正文。expiresAt 为可读的到期时间，remaining 为可读的剩余时长
+// （已过期时传入 CertExpired()）。
+func (l Lang) CertExpiringBody(service, expiresAt, remaining string) string {
+	if l.isZH() {
+		return fmt.Sprintf("服务 %s 的 HTTPS 证书将于 %s 到期（%s），请及时续期。", service, expiresAt, remaining)
+	}
+	return fmt.Sprintf("The HTTPS certificate of %s expires at %s (%s). Please renew it soon.", service, expiresAt, remaining)
+}
+
+// CertExpired 证书已过期的剩余时长文案
+func (l Lang) CertExpired() string {
+	return l.pick("已过期", "expired")
 }
 
 // --- 邮件与订阅源框架文案 ---
@@ -146,6 +218,25 @@ func (l Lang) EmailFooter() string {
 // EmailBrand 邮件抬头品牌名
 func (l Lang) EmailBrand() string {
 	return "LumiPulse"
+}
+
+// UnsubscribeHint / UnsubscribeAction 订阅邮件底部的退订区块文案
+func (l Lang) UnsubscribeHint() string {
+	return l.pick("您收到这封邮件是因为订阅了本状态页的服务通知。", "You are receiving this email because you subscribed to status updates.")
+}
+
+func (l Lang) UnsubscribeAction() string {
+	return l.pick("退订或修改订阅偏好", "Unsubscribe or manage preferences")
+}
+
+// ConfirmUnsubscribed 退订成功后的提示文案
+func (l Lang) ConfirmUnsubscribed() string {
+	return l.pick("已退订，您不会再收到状态通知。", "You have been unsubscribed and will no longer receive status notifications.")
+}
+
+// ConfirmPreferencesSaved 偏好保存成功后的提示文案
+func (l Lang) ConfirmPreferencesSaved() string {
+	return l.pick("订阅偏好已更新。", "Your subscription preferences have been updated.")
 }
 
 // FeedTitle 订阅源标题
@@ -291,9 +382,59 @@ func (l Lang) SLAIntro(month string) string {
 // SLAFooterNote 邮件结尾说明
 func (l Lang) SLAFooterNote() string {
 	return l.pick(
-		"统计口径：可用率按探测次数加权，失败探测按 200 ≤ status &lt; 400 或 TCP 成功判定。",
-		"Methodology: uptime is weighted by probe count; a probe fails unless 200 &le; status &lt; 400 or the TCP check succeeds.",
+		"统计口径：可用率按探测次数加权；每次探测按服务自己的成功判定统计（默认 200 ≤ status &lt; 400 或 TCP 连通，服务可自定义期望状态码与响应关键字）。",
+		"Methodology: uptime is weighted by probe count; each probe is judged by the service's own criteria (by default 200 &le; status &lt; 400 or a successful TCP check; services may define expected status codes and response keywords).",
 	)
+}
+
+// --- 周报摘要（复用月报的版式与统计口径）---
+
+// WeeklyTitle 周报标题
+func (l Lang) WeeklyTitle() string {
+	return l.pick("周报摘要", "Weekly summary")
+}
+
+// dayLabel 把 YYYY-MM-DD 渲染成展示用日期
+func (l Lang) dayLabel(day string) string {
+	t, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		return day
+	}
+	if l.isZH() {
+		return t.Format("2006 年 01 月 02 日")
+	}
+	return t.Format("Jan 2, 2006")
+}
+
+// DateRangeLabel 把统计区间渲染成展示用文案（含首尾两天）
+func (l Lang) DateRangeLabel(from, to string) string {
+	return fmt.Sprintf("%s - %s", l.dayLabel(from), l.dayLabel(to))
+}
+
+// ShortDateRange 统计区间的紧凑写法，用于汇总卡片里的小字
+func (l Lang) ShortDateRange(from, to string) string {
+	f, errF := time.Parse("2006-01-02", from)
+	t, errT := time.Parse("2006-01-02", to)
+	if errF != nil || errT != nil {
+		return fmt.Sprintf("%s - %s", from, to)
+	}
+	if l.isZH() {
+		return fmt.Sprintf("%s ~ %s", f.Format("01-02"), t.Format("01-02"))
+	}
+	return fmt.Sprintf("%s - %s", f.Format("Jan 2"), t.Format("2"))
+}
+
+// WeeklyIntro 周报开头的一句话
+func (l Lang) WeeklyIntro(from, to string) string {
+	if l.isZH() {
+		return fmt.Sprintf("以下是 %s 至 %s 的服务可用率汇总。", l.dayLabel(from), l.dayLabel(to))
+	}
+	return fmt.Sprintf("Here is the availability summary for %s - %s.", l.dayLabel(from), l.dayLabel(to))
+}
+
+// SLACompareLabel 环比上一周期的前缀文案
+func (l Lang) SLACompareLabel() string {
+	return l.pick("较上周：", "vs last week: ")
 }
 
 // pick 按语言二选一

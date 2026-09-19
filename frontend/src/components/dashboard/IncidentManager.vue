@@ -6,6 +6,9 @@ import IncidentDetail from './IncidentDetail.vue'
 import CustomSelect from './CustomSelect.vue'
 import { useToast } from '../../composables/useToast'
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
+import { useI18n } from '../../composables/useI18n'
+
+const { t, formatDateTime } = useI18n()
 
 const incidents = ref<Incident[]>([])
 const loading = ref(true)
@@ -42,7 +45,7 @@ function isMerged(inc: Incident): boolean {
 
 function openMerge(inc: Incident) {
   if (inc.status === 'resolved') {
-    toast('已解决的事件不能合并')
+    toast(t('admin.incident.cannotMergeResolved'))
     return
   }
   mergeTarget.value = inc
@@ -55,10 +58,10 @@ async function saveMerge() {
   try {
     await api.mergeIncident(mergeTarget.value.id, Number(mergeSourceId.value))
     showMerge.value = false
-    toast('合并成功', 'success')
+    toast(t('admin.incident.mergeSuccess'), 'success')
     load()
   } catch (e: any) {
-    toast(e.message || '合并失败')
+    toast(e.message || t('admin.incident.mergeFailed'))
   }
 }
 
@@ -70,7 +73,7 @@ async function openDetail(inc: Incident) {
   } catch (e: any) {
     // Fallback: use list item if detail fetch fails
     selectedIncident.value = inc
-    toast(e.message || '加载事件详情失败')
+    toast(e.message || t('admin.incident.loadDetailFailed'))
   } finally {
     loadingDetail.value = false
   }
@@ -106,7 +109,7 @@ function handleDetailDeleted() {
 async function handleSplit(id: number) {
   try {
     await api.splitIncident(id)
-    toast('拆分成功', 'success')
+    toast(t('admin.incident.splitSuccess'), 'success')
     // If viewing a parent incident, re-fetch detail to update children list
     if (selectedIncident.value && selectedIncident.value.id !== id) {
       const res = await api.getAdminIncident(selectedIncident.value.id)
@@ -116,7 +119,7 @@ async function handleSplit(id: number) {
       await load()
     }
   } catch (e: any) {
-    toast(e.message || '拆分失败')
+    toast(e.message || t('admin.incident.splitFailed'))
   }
 }
 
@@ -141,12 +144,33 @@ const showUpdate = ref(false)
 const updateIncident = ref<Incident | null>(null)
 const updateForm = ref({ status: 'investigating', content: '' })
 
-const statusLabel: Record<string, string> = {
-  investigating: '调查中',
-  identified: '已确认',
-  monitoring: '监控中',
-  resolved: '已解决',
-}
+const statusLabel = computed<Record<string, string>>(() => ({
+  investigating: t('incident.status.investigating'),
+  identified: t('incident.status.identified'),
+  monitoring: t('incident.status.monitoring'),
+  resolved: t('incident.status.resolved'),
+}))
+
+const impactLabel = computed<Record<string, string>>(() => ({
+  critical: t('incident.impact.critical'),
+  major: t('incident.impact.major'),
+  minor: t('incident.impact.minor'),
+}))
+
+/** 影响等级下拉选项（随语言切换重新渲染） */
+const impactOptions = computed(() => [
+  { label: t('incident.impact.minor'), value: 'minor' },
+  { label: t('incident.impact.major'), value: 'major' },
+  { label: t('incident.impact.critical'), value: 'critical' },
+])
+
+/** 事件状态下拉选项（随语言切换重新渲染） */
+const statusOptions = computed(() => [
+  { label: t('incident.status.investigating'), value: 'investigating' },
+  { label: t('incident.status.identified'), value: 'identified' },
+  { label: t('incident.status.monitoring'), value: 'monitoring' },
+  { label: t('incident.status.resolved'), value: 'resolved' },
+])
 
 const impactClass = (s: string) => {
   switch (s) {
@@ -164,10 +188,44 @@ async function load() {
     incidents.value = res.data.incidents
     totalPage.value = res.data.pagination.totalPage
   } catch (e: any) {
-    toast(e.message || '加载失败')
+    toast(e.message || t('admin.incident.loadFailed'))
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 切换事件的人工确认状态。
+ * 未确认且长时间无人处理的活跃事件会被后端再次升级通知（见 checker/escalation.go），
+ * 确认后即停止升级；取消确认会把升级计数重置，重新进入未确认流程。
+ */
+async function toggleAck(inc: Incident) {
+  const next = !inc.acknowledged
+  if (!next && !confirm(t('admin.incident.confirmUnack'))) return
+  try {
+    await api.updateIncident(inc.id, { acknowledged: next })
+    toast(next ? t('admin.incident.ackSuccess') : t('admin.incident.unackSuccess'), 'success')
+    // 详情页打开时同步刷新，避免两处状态不一致
+    if (selectedIncident.value && selectedIncident.value.id === inc.id) {
+      await openDetail(inc)
+    }
+    load()
+  } catch (e: any) {
+    toast(e.message || t('admin.incident.actionFailed'))
+  }
+}
+
+/** 确认信息的展示文案 */
+function ackText(inc: Incident): string {
+  if (!inc.acknowledged) {
+    return inc.escalationCount > 0
+      ? t('admin.incident.unacknowledgedEscalated', { n: inc.escalationCount })
+      : t('admin.incident.unacknowledged')
+  }
+  const detail = [inc.acknowledgedBy || '', inc.acknowledgedAt ? formatDateTime(inc.acknowledgedAt) : '']
+    .filter(Boolean)
+    .join(' ')
+  return detail ? t('admin.incident.acknowledgedAt', { detail }) : t('admin.incident.acknowledged')
 }
 
 function goPage(p: number) {
@@ -232,21 +290,21 @@ async function save() {
     }
     showForm.value = false
     cleanInc()
-    toast(editing.value ? '更新成功' : '创建成功', 'success')
+    toast(editing.value ? t('admin.incident.updateSuccess') : t('admin.incident.createSuccess'), 'success')
     load()
   } catch (e: any) {
-    toast(e.message || '保存失败')
+    toast(e.message || t('admin.incident.saveFailed'))
   }
 }
 
 async function remove(id: number) {
-  if (!confirm('确定要删除吗？')) return
+  if (!confirm(t('admin.incident.confirmDelete'))) return
   try {
     await api.deleteIncident(id)
-    toast('删除成功', 'success')
+    toast(t('admin.incident.deleteSuccess'), 'success')
     load()
   } catch (e: any) {
-    toast(e.message || '删除失败')
+    toast(e.message || t('admin.incident.deleteFailed'))
   }
 }
 
@@ -257,7 +315,7 @@ function openUpdate(inc: Incident) {
 }
 
 function handleCloseUpdate() {
-  if (updateDirty.value && !confirm('有未保存的更改，确定要关闭吗？')) return
+  if (updateDirty.value && !confirm(t('admin.incident.confirmDiscardChanges'))) return
   showUpdate.value = false
 }
 
@@ -267,10 +325,10 @@ async function saveUpdate() {
     await api.createIncidentUpdate(updateIncident.value.id, updateForm.value)
     showUpdate.value = false
     updateDirty.value = false
-    toast('更新成功', 'success')
+    toast(t('admin.incident.updateSuccess'), 'success')
     load()
   } catch (e: any) {
-    toast(e.message || '更新失败')
+    toast(e.message || t('admin.incident.updateFailed'))
   }
 }
 
@@ -283,7 +341,7 @@ onMounted(() => {
 <template>
   <div>
     <!-- Detail view -->
-    <div v-if="loadingDetail" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+    <div v-if="loadingDetail" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
     <IncidentDetail
       v-else-if="selectedIncident"
       :incident="selectedIncident"
@@ -299,25 +357,26 @@ onMounted(() => {
     <!-- List view -->
     <template v-else>
     <div class="flex justify-between items-center mb-4">
-      <h2 class="text-lg font-bold" style="color: var(--text-color);">事件管理</h2>
+      <h2 class="text-lg font-bold" style="color: var(--text-color);">{{ t('admin.incident.listTitle') }}</h2>
       <button @click="openCreate" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-1 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
-        创建事件
+        {{ t('admin.incident.create') }}
       </button>
     </div>
 
-    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
 
     <div v-else class="rounded-xl" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
         <thead class="text-xs" style="color: var(--text-color); opacity: 0.4; background-color: var(--button-hover-color); opacity: 0.5; border-bottom: 1px solid var(--button-border-color);">
           <tr>
-            <th class="px-6 py-3 font-medium">标题</th>
-            <th class="px-6 py-3 font-medium">影响</th>
-            <th class="px-6 py-3 font-medium">状态</th>
-            <th class="px-6 py-3 font-medium">时间</th>
-            <th class="px-6 py-3 font-medium text-right">操作</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.incident.colTitle') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.incident.colImpact') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.incident.colAck') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.incident.colStatus') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.incident.colTime') }}</th>
+            <th class="px-6 py-3 font-medium text-right">{{ t('admin.incident.colActions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y">
@@ -325,23 +384,38 @@ onMounted(() => {
             <td class="px-6 py-4 font-bold" style="color: var(--text-color);">{{ inc.title }}</td>
             <td class="px-6 py-4">
               <span :class="['inline-flex items-center px-2 py-1 rounded text-xs font-medium border', impactClass(inc.impact)]">
-                {{ inc.impact === 'critical' ? '严重' : inc.impact === 'major' ? '较大' : '轻微' }}
+                {{ impactLabel[inc.impact] || inc.impact }}
               </span>
             </td>
+            <td class="px-6 py-4" @click.stop>
+              <button
+                @click="toggleAck(inc)"
+                :disabled="inc.status === 'resolved'"
+                :title="inc.status === 'resolved' ? t('admin.incident.ackTooltipResolved') : (inc.acknowledged ? t('admin.incident.ackTooltipUnack') : t('admin.incident.ackTooltipAck'))"
+                class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border cursor-pointer transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                :class="inc.acknowledged
+                  ? 'text-emerald-600 bg-emerald-50 border-emerald-100 dark:text-emerald-400 dark:bg-emerald-500/15 dark:border-emerald-800'
+                  : 'text-amber-600 bg-amber-50 border-amber-100 dark:text-amber-400 dark:bg-amber-900/30 dark:border-amber-800'"
+                :style="inc.status === 'resolved' ? 'color: var(--text-color); background-color: var(--bg-color); border-color: var(--button-border-color);' : ''"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :class="inc.acknowledged ? 'bg-emerald-500' : 'bg-amber-500'" />
+                {{ ackText(inc) }}
+              </button>
+            </td>
             <td class="px-6 py-4" style="color: var(--text-color); opacity: 0.5;">{{ statusLabel[inc.status] || inc.status }}</td>
-            <td class="px-6 py-4 text-xs" style="color: var(--text-color); opacity: 0.5;">{{ new Date(inc.createdAt).toLocaleString('zh-CN') }}</td>
+            <td class="px-6 py-4 text-xs" style="color: var(--text-color); opacity: 0.5;">{{ formatDateTime(inc.createdAt) }}</td>
             <td class="px-6 py-4 text-right">
-              <button @click.stop="openEdit(inc)" class="op-btn op-btn-edit mr-3" title="编辑">
+              <button @click.stop="openEdit(inc)" class="op-btn op-btn-edit mr-3" :title="t('admin.incident.edit')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
               </button>
-              <button @click.stop="openUpdate(inc)" class="op-btn mr-3" title="事件更新">
+              <button @click.stop="openUpdate(inc)" class="op-btn mr-3" :title="t('admin.incident.incidentUpdate')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </button>
-              <button @click.stop="remove(inc.id)" class="op-btn op-btn-delete" title="删除">
+              <button @click.stop="remove(inc.id)" class="op-btn op-btn-delete" :title="t('admin.incident.delete')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
@@ -361,18 +435,17 @@ onMounted(() => {
         class="px-3 py-1.5 text-sm rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         style="border: 1px solid var(--button-border-color); color: var(--text-color); opacity: 0.6;"
       >
-        上一页
+        {{ t('admin.incident.prevPage') }}
       </button>
       <span class="text-sm px-3" style="color: var(--text-color); opacity: 0.5;">
-        第 {{ page }} / {{ totalPage }} 页
-      </span>
-      <button
+        {{ t('admin.incident.pageOf', { page, total: totalPage }) }}
+      </span>      <button
         @click="goPage(page + 1)"
         :disabled="page >= totalPage"
         class="px-3 py-1.5 text-sm rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         style="border: 1px solid var(--button-border-color); color: var(--text-color); opacity: 0.6;"
       >
-        下一页
+        {{ t('admin.incident.nextPage') }}
       </button>
     </div>
     </template>
@@ -380,28 +453,28 @@ onMounted(() => {
     <!-- Incident Form -->
     <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseInc">
       <div class="rounded-xl p-4 md:p-6 w-full max-w-lg mx-4" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ editing ? '编辑事件' : '创建事件' }}</h3>
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ editing ? t('admin.incident.editIncident') : t('admin.incident.create') }}</h3>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">标题 *</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.incident.labelTitle') }}</label>
             <input v-model="form.title" class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">影响等级 *</label>
-            <CustomSelect v-model="form.impact" :options="[{ label: '轻微', value: 'minor' }, { label: '较大', value: 'major' }, { label: '严重', value: 'critical' }]" />
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.incident.labelImpact') }}</label>
+            <CustomSelect v-model="form.impact" :options="impactOptions" />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">状态</label>
-            <CustomSelect v-model="form.status" :options="[{ label: '调查中', value: 'investigating' }, { label: '已确认', value: 'identified' }, { label: '监控中', value: 'monitoring' }, { label: '已解决', value: 'resolved' }]" />
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.incident.labelStatus') }}</label>
+            <CustomSelect v-model="form.status" :options="statusOptions" />
           </div>
           <div class="relative">
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">服务 *</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.incident.labelService') }}</label>
             <input
               v-model="serviceSearch"
               @focus="showServiceDropdown = true"
               @blur="delayBlur"
               type="text"
-              placeholder="搜索服务..."
+              :placeholder="t('admin.incident.searchServicePlaceholder')"
               class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
               style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
             />
@@ -420,14 +493,14 @@ onMounted(() => {
                 {{ svc.name }}
               </div>
               <div v-if="filteredServices.length === 0" class="px-3 py-2 text-sm" style="color: var(--text-color); opacity: 0.4;">
-                无匹配服务
+                {{ t('admin.incident.noMatchingService') }}
               </div>
             </div>
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="handleCloseInc" class="btn-cancel px-4 py-2 text-sm rounded-lg">取消</button>
-          <button @click="save" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
+          <button @click="handleCloseInc" class="btn-cancel px-4 py-2 text-sm rounded-lg">{{ t('admin.incident.cancel') }}</button>
+          <button @click="save" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">{{ t('admin.incident.save') }}</button>
         </div>
       </div>
     </div>
@@ -435,21 +508,21 @@ onMounted(() => {
     <!-- Incident Update Form -->
     <div v-if="showUpdate && updateIncident" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseUpdate">
       <div class="rounded-xl p-4 md:p-6 w-full max-w-lg mx-4" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">事件更新</h3>
-        <div class="text-sm mb-4" style="color: var(--text-color); opacity: 0.5;">更新事件: {{ updateIncident.title }}</div>
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ t('admin.incident.incidentUpdate') }}</h3>
+        <div class="text-sm mb-4" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.incident.updateEventFor', { title: updateIncident.title }) }}</div>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">状态 *</label>
-            <CustomSelect v-model="updateForm.status" :options="[{ label: '调查中', value: 'investigating' }, { label: '已确认', value: 'identified' }, { label: '监控中', value: 'monitoring' }, { label: '已解决', value: 'resolved' }]" />
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.incident.labelStatusRequired') }}</label>
+            <CustomSelect v-model="updateForm.status" :options="statusOptions" />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">内容 *</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.incident.labelContent') }}</label>
             <textarea v-model="updateForm.content" rows="3" class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"></textarea>
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="handleCloseUpdate" class="btn-cancel px-4 py-2 text-sm rounded-lg">取消</button>
-          <button @click="saveUpdate" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
+          <button @click="handleCloseUpdate" class="btn-cancel px-4 py-2 text-sm rounded-lg">{{ t('admin.incident.cancel') }}</button>
+          <button @click="saveUpdate" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">{{ t('admin.incident.save') }}</button>
         </div>
       </div>
     </div>
@@ -457,22 +530,22 @@ onMounted(() => {
     <!-- Merge Modal -->
     <div v-if="showMerge && mergeTarget" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showMerge = false">
       <div class="rounded-xl p-4 md:p-6 w-full max-w-lg mx-4" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">合并事件</h3>
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ t('admin.incident.mergeTitle') }}</h3>
         <div class="text-sm mb-4" style="color: var(--text-color); opacity: 0.5;">
-          选择要合并至「{{ mergeTarget.title }}」的事件
+          {{ t('admin.incident.mergeHint', { title: mergeTarget.title }) }}
         </div>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">选择事件 *</label>
-            <CustomSelect v-model="mergeSourceId" :options="mergeOptions" placeholder="请选择..." />
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.incident.labelSelectIncident') }}</label>
+            <CustomSelect v-model="mergeSourceId" :options="mergeOptions" :placeholder="t('admin.incident.selectPlaceholder')" />
             <div v-if="mergeableIncidents.length === 0" class="text-sm mt-2" style="color: var(--text-color); opacity: 0.4;">
-              没有可合并的事件
+              {{ t('admin.incident.noMergeableIncident') }}
             </div>
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="showMerge = false" class="btn-cancel px-4 py-2 text-sm rounded-lg">取消</button>
-          <button @click="saveMerge" :disabled="!mergeSourceId || mergeableIncidents.length === 0" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-40">合并</button>
+          <button @click="showMerge = false" class="btn-cancel px-4 py-2 text-sm rounded-lg">{{ t('admin.incident.cancel') }}</button>
+          <button @click="saveMerge" :disabled="!mergeSourceId || mergeableIncidents.length === 0" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-40">{{ t('admin.incident.merge') }}</button>
         </div>
       </div>
     </div>

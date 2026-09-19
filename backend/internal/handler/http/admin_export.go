@@ -17,6 +17,11 @@ func (h *Handler) AdminExport(c *gin.Context) {
 	if err != nil {
 		services = []*model.Service{}
 	}
+	// 导出文件可能被下载/转发，探测请求头与请求体属于敏感信息，一律不回显；
+	// 重新导入后这两个字段为空，需要重新填写。
+	for _, svc := range services {
+		svc.MaskServiceSecrets()
+	}
 
 	incidents, _, err := h.Repo.ListIncidents(ctx, 1, 100000)
 	if err != nil {
@@ -42,6 +47,33 @@ func (h *Handler) AdminExport(c *gin.Context) {
 		maintenances = []*model.Maintenance{}
 	}
 
+	folders, err := h.Repo.ListServiceFolders(ctx)
+	if err != nil {
+		folders = []*model.ServiceFolder{}
+	}
+	// 分组在导入时会被清空重建、自增 ID 顺延，因此导出文件里不写库内 ID，
+	// 而写「导出内引用号」（从 1 起的紧凑序号）：服务的 folder_id 同步改写成引用号，
+	// 导入时再按引用号映射到新分组 ID。这样导出的数据可以安全地导入到任意实例，
+	// 不会因为新旧自增 ID 相同却指向不同分组而挂错分组。
+	folderRef := make(map[int64]int64, len(folders))
+	for i, f := range folders {
+		ref := int64(i + 1)
+		folderRef[f.ID] = ref
+		f.ID = ref
+	}
+	for _, svc := range services {
+		if svc.FolderID == nil {
+			continue
+		}
+		if ref, ok := folderRef[*svc.FolderID]; ok {
+			refID := ref
+			svc.FolderID = &refID
+		} else {
+			// 脏数据：分组不存在时按未分组导出
+			svc.FolderID = nil
+		}
+	}
+
 	settings := utils.GetAllSettings()
 
 	data := model.ExportData{
@@ -52,6 +84,7 @@ func (h *Handler) AdminExport(c *gin.Context) {
 		IncidentUpdates: allUpdates,
 		Maintenances:    maintenances,
 		Settings:        settings,
+		ServiceFolders:  folders,
 	}
 
 	utils.Info("data exported: %d services, %d incidents, %d maintenances", len(services), len(incidents), len(maintenances))
@@ -89,6 +122,7 @@ func (h *Handler) AdminImport(c *gin.Context) {
 		Incidents:       data.Incidents,
 		IncidentUpdates: data.IncidentUpdates,
 		Maintenances:    data.Maintenances,
+		ServiceFolders:  data.ServiceFolders,
 	}
 
 	if err := h.Repo.ImportFullData(ctx, importData); err != nil {

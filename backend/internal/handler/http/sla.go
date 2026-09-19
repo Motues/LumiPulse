@@ -209,6 +209,17 @@ func (h *Handler) buildMonthlySLACtx(ctx context.Context, month time.Time) (*mod
 		Final: reportFinal(month, time.Now().UTC()),
 	}
 
+	return assembleSLAReport(services, byService, coveredDays, report), nil
+}
+
+// assembleSLAReport 把「服务列表 + 每服务聚合 + 覆盖天数」装配成报告。
+// 月报与周报共用这一段，避免两处统计口径各自漂移。
+func assembleSLAReport(
+	services []*model.Service,
+	byService map[int64]*model.ServiceMonthly,
+	coveredDays map[int64]int,
+	report *model.MonthlySLAReport,
+) *model.MonthlySLAReport {
 	for _, svc := range services {
 		summary := &model.ServiceSLASummary{
 			ServiceID:  svc.ID,
@@ -228,7 +239,7 @@ func (h *Handler) buildMonthlySLACtx(ctx context.Context, month time.Time) (*mod
 				summary.Uptime = 100
 			}
 		} else {
-			// 该月没有任何探测数据：可用率给满值，前端据此显示「无数据」
+			// 该周期内没有任何探测数据：可用率给满值，前端据此显示「无数据」
 			summary.Uptime = 100
 		}
 
@@ -250,7 +261,7 @@ func (h *Handler) buildMonthlySLACtx(ctx context.Context, month time.Time) (*mod
 		report.Summary.Uptime = 100
 	}
 
-	return report, nil
+	return report
 }
 
 // daysInMonth 该月天数

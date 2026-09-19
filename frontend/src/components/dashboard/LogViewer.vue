@@ -3,6 +3,9 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../../api/client'
 import type { LogEntry, ServiceSummary } from '../../api/types'
 import CustomSelect from './CustomSelect.vue'
+import { useI18n } from '../../composables/useI18n'
+
+const { t } = useI18n()
 
 const logs = ref<LogEntry[]>([])
 const loading = ref(true)
@@ -84,8 +87,10 @@ function onFilterChange() {
   fetchLogs()
 }
 
-function isSuccess(status: number): boolean {
-  return (status >= 200 && status < 400) || status === 1
+// 成功与否由后端按服务自己的判定口径（期望状态码 + 期望关键字）给出，
+// 前端只负责展示，避免自行按状态码猜测而与筛选结果不一致。
+function isSuccess(entry: LogEntry): boolean {
+  return entry.isSuccess
 }
 
 function statusLabel(status: number): string {
@@ -131,16 +136,16 @@ onUnmounted(() => {
         <CustomSelect
           v-model="filterServiceId"
           @update:modelValue="onFilterChange"
-          :options="[{ label: '全部服务', value: '0' }, ...services.map(svc => ({ label: svc.name, value: String(svc.id) }))]"
+          :options="[{ label: t('admin.log.filterAllServices'), value: '0' }, ...services.map(svc => ({ label: svc.name, value: String(svc.id) }))]"
           min-width="140px"
         />
         <CustomSelect
           v-model="filterStatus"
           @update:modelValue="onFilterChange"
-          :options="[{ label: '全部状态', value: 'all' }, { label: '正常', value: 'success' }, { label: '异常', value: 'failure' }]"
+          :options="[{ label: t('admin.log.filterAllStatus'), value: 'all' }, { label: t('admin.log.statusSuccess'), value: 'success' }, { label: t('admin.log.statusFailure'), value: 'failure' }]"
           min-width="110px"
         />
-        <span class="text-xs" style="color: var(--text-color); opacity: 0.4;">{{ logs.length }} 条记录</span>
+        <span class="text-xs" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.log.records', { n: logs.length }) }}</span>
       </div>
       <div class="flex items-center gap-2">
         <button
@@ -152,26 +157,26 @@ onUnmounted(() => {
           <svg class="w-3.5 h-3.5" :class="{ 'animate-spin': autoRefresh }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-          {{ autoRefresh ? '实时' : '暂停' }}
+          {{ autoRefresh ? t('admin.log.live') : t('admin.log.paused') }}
         </button>
       </div>
     </div>
 
     <!-- Table -->
     <div class="rounded-xl overflow-hidden" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-      <div v-if="loading" class="text-center py-16 text-sm" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
-      <div v-else-if="logs.length === 0" class="text-center py-16 text-sm" style="color: var(--text-color); opacity: 0.4;">暂无监控日志</div>
+      <div v-if="loading" class="text-center py-16 text-sm" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
+      <div v-else-if="logs.length === 0" class="text-center py-16 text-sm" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.log.empty') }}</div>
 
       <template v-else>
         <div class="overflow-x-auto thin-scroll">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-xs uppercase tracking-wider" style="border-bottom: 1px solid var(--button-border-color); color: var(--text-color); opacity: 0.5;">
-                <th class="text-left px-4 py-3 font-medium">时间</th>
-                <th class="text-left px-4 py-3 font-medium">服务</th>
-                <th class="text-left px-4 py-3 font-medium">状态</th>
-                <th class="text-left px-4 py-3 font-medium">延迟</th>
-                <th class="text-left px-4 py-3 font-medium">信息</th>
+                <th class="text-left px-4 py-3 font-medium">{{ t('admin.log.colTime') }}</th>
+                <th class="text-left px-4 py-3 font-medium">{{ t('admin.log.colService') }}</th>
+                <th class="text-left px-4 py-3 font-medium">{{ t('admin.log.colStatus') }}</th>
+                <th class="text-left px-4 py-3 font-medium">{{ t('admin.log.colLatency') }}</th>
+                <th class="text-left px-4 py-3 font-medium">{{ t('admin.log.colMessage') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -189,12 +194,12 @@ onUnmounted(() => {
                 <td class="px-4 py-3 whitespace-nowrap">
                   <span
                     class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium"
-                    :class="isSuccess(log.status)
+                    :class="isSuccess(log)
                       ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                       : 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300'"
                   >
-                    <span class="w-1.5 h-1.5 rounded-full" :class="isSuccess(log.status) ? 'bg-emerald-500' : 'bg-red-500'" />
-                    {{ isSuccess(log.status) ? '正常' : '异常' }}
+                    <span class="w-1.5 h-1.5 rounded-full" :class="isSuccess(log) ? 'bg-emerald-500' : 'bg-red-500'" />
+                    {{ isSuccess(log) ? t('admin.log.statusSuccess') : t('admin.log.statusFailure') }}
                     <span class="font-mono" style="color: var(--text-color); opacity: 0.4;">({{ statusLabel(log.status) }})</span>
                   </span>
                 </td>
@@ -213,20 +218,20 @@ onUnmounted(() => {
 
         <!-- Pagination -->
         <div v-if="totalPage > 1" class="flex items-center justify-between px-4 py-3" style="border-top: 1px solid var(--button-border-color);">
-          <span class="text-xs" style="color: var(--text-color); opacity: 0.5;">第 {{ page }} / {{ totalPage }} 页</span>
+          <span class="text-xs" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.log.pageOf', { page, total: totalPage }) }}</span>
           <div class="flex items-center gap-2">
             <button
               @click="prevPage"
               :disabled="page <= 1"
               class="px-3 py-1 text-xs rounded-md border disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               style="border-color: var(--button-border-color); color: var(--text-color);"
-            >上一页</button>
+            >{{ t('admin.log.prevPage') }}</button>
             <button
               @click="nextPage"
               :disabled="page >= totalPage"
               class="px-3 py-1 text-xs rounded-md border disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               style="border-color: var(--button-border-color); color: var(--text-color);"
-            >下一页</button>
+            >{{ t('admin.log.nextPage') }}</button>
           </div>
         </div>
       </template>

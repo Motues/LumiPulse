@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/tls"
 	"fmt"
+	"html"
 	"net/smtp"
 	"strings"
 
@@ -52,6 +53,8 @@ func sendMail(to, subject, body string, isHTML bool) error {
 	}
 }
 
+// SendAlert 发送告警邮件。subject/body 都是纯文本（可能来自自定义模板），
+// 写入 HTML 前统一做转义与换行处理。
 func SendAlert(subject, body string) error {
 	raw := GetSetting("notify_emails")
 	if raw == "" {
@@ -64,7 +67,7 @@ func SendAlert(subject, body string) error {
 		if email == "" {
 			continue
 		}
-		htmlBody := buildStyledEmail(subject, body)
+		htmlBody := buildStyledEmail(subject, body, "")
 		if err := SendHTMLMail(email, subject, htmlBody); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", email, err))
 		}
@@ -75,7 +78,36 @@ func SendAlert(subject, body string) error {
 	return nil
 }
 
-func buildStyledEmail(title, content string) string {
+// SendSubscriberMail 发送给公开订阅者的邮件：正文之外再附上退订/偏好管理链接。
+// 站点地址未配置时省略该区块（宁可不显示，也不要给出一个点不开的链接）。
+func SendSubscriberMail(to, subject, body string) error {
+	return SendHTMLMail(to, subject, buildStyledEmail(subject, body, unsubscribeFooterHTML(to)))
+}
+
+// textToHTML 把模板/内置文案的纯文本转成安全的 HTML 片段：
+// 先转义特殊字符（服务名、URL 等变量值可能含 & < >），再把换行变成 <br>。
+// 因此自定义模板不需要（也不应该）自己写 HTML。
+func textToHTML(s string) string {
+	escaped := html.EscapeString(s)
+	escaped = strings.ReplaceAll(escaped, "\r\n", "\n")
+	return strings.ReplaceAll(escaped, "\n", "<br>")
+}
+
+// unsubscribeFooterHTML 邮件底部的退订区块
+func unsubscribeFooterHTML(email string) string {
+	url := UnsubscribeURL(email)
+	if url == "" {
+		return ""
+	}
+	lang := i18n.Current()
+	return fmt.Sprintf(
+		`<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eee;font-size:12px;color:#999">`+
+			`%s<br><a href="%s" style="color:#10b981;text-decoration:none">%s</a></div>`,
+		lang.UnsubscribeHint(), url, lang.UnsubscribeAction(),
+	)
+}
+
+func buildStyledEmail(title, content, extraFooter string) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -90,7 +122,7 @@ func buildStyledEmail(title, content string) string {
             </td>
           </tr>
           <tr>
-            <td style="padding:16px 32px 32px;font-size:14px;line-height:1.7;color:#555">%s</td>
+            <td style="padding:16px 32px 32px;font-size:14px;line-height:1.7;color:#555">%s%s</td>
           </tr>
           <tr>
             <td style="padding:16px 32px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center">
@@ -102,7 +134,7 @@ func buildStyledEmail(title, content string) string {
     </tr>
   </table>
 </body>
-</html>`, title, content, i18n.Current().EmailFooter())
+</html>`, textToHTML(title), textToHTML(content), extraFooter, i18n.Current().EmailFooter())
 }
 
 func sendMailTLS(addr, user, pass, to string, msg []byte) error {

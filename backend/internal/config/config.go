@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +21,11 @@ type Config struct {
 	// Lang 服务端生成内容（RSS / Atom 订阅源、告警邮件、月报邮件）的语言。
 	// 支持 zh-CN / en-US，默认 zh-CN（与历史文案保持一致）。
 	Lang string `yaml:"LANG"`
+	// MaxProbeConcurrency 单轮探测的最大并发数（默认 8）。
+	// 服务数量多、且多个服务同时超时时，调大该值可缩短一轮探测的总耗时。
+	MaxProbeConcurrency int `yaml:"MAX_PROBE_CONCURRENCY"`
+	// MaintenanceRemindMinutes 维护计划开始前的提醒提前量（分钟，默认 30，0 = 关闭提醒）。
+	MaintenanceRemindMinutes int `yaml:"MAINTENANCE_REMIND_MINUTES"`
 }
 
 var GlobalConfig *Config
@@ -27,11 +33,37 @@ var GlobalConfig *Config
 // DefaultConfig 默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		Port:                   3000,
-		HeartbeatRetentionDays: 30,
-		DailyRetentionDays:     90,
-		Lang:                   "zh-CN",
+		Port:                     3000,
+		HeartbeatRetentionDays:   30,
+		DailyRetentionDays:       90,
+		Lang:                     "zh-CN",
+		MaxProbeConcurrency:      8,
+		MaintenanceRemindMinutes: 30,
 	}
+}
+
+// maxProbeConcurrencyLimit 并发上限。并发数与数据库连接数（4）无关，
+// 但无上限会让大量服务同时超时时打满文件描述符，因此给一个硬上限。
+const maxProbeConcurrencyLimit = 64
+
+// ProbeConcurrency 返回生效的探测并发数（含兜底与上限）
+func (c *Config) ProbeConcurrency() int {
+	if c == nil || c.MaxProbeConcurrency <= 0 {
+		return 8
+	}
+	if c.MaxProbeConcurrency > maxProbeConcurrencyLimit {
+		return maxProbeConcurrencyLimit
+	}
+	return c.MaxProbeConcurrency
+}
+
+// MaintenanceRemindLead 返回维护提前提醒的提前量。
+// 返回 0 表示关闭提醒；负数按 0 处理。
+func (c *Config) MaintenanceRemindLead() time.Duration {
+	if c == nil || c.MaintenanceRemindMinutes <= 0 {
+		return 0
+	}
+	return time.Duration(c.MaintenanceRemindMinutes) * time.Minute
 }
 
 // HeartbeatRetention 返回生效的心跳保留天数（含兜底）
@@ -63,6 +95,16 @@ func (c *Config) ContentLang() string {
 	return "zh-CN"
 }
 
+// applyEnvOverrides 应用环境变量覆盖（优先级高于配置文件）。
+// 首次启动（配置文件还不存在）同样要生效，否则 PORT 会被默认值顶掉。
+func applyEnvOverrides(cfg *Config) {
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			cfg.Port = p
+		}
+	}
+}
+
 // LoadConfig 加载或初始化配置文件
 func LoadConfig() (*Config, error) {
 	configPath := "./config/config.yaml"
@@ -82,6 +124,7 @@ func LoadConfig() (*Config, error) {
 		if err := os.WriteFile(configPath, data, 0644); err != nil {
 			return nil, err
 		}
+		applyEnvOverrides(defaultCfg)
 		GlobalConfig = defaultCfg
 		return defaultCfg, nil
 	}
@@ -97,12 +140,7 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
-	// PORT 环境变量优先
-	if envPort := os.Getenv("PORT"); envPort != "" {
-		if p, err := strconv.Atoi(envPort); err == nil {
-			cfg.Port = p
-		}
-	}
+	applyEnvOverrides(&cfg)
 
 	GlobalConfig = &cfg
 	return &cfg, nil

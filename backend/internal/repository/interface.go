@@ -6,6 +6,9 @@ import (
 )
 
 type Repository interface {
+	// Ping 检查数据库连通性（readiness 探针使用）
+	Ping(ctx context.Context) error
+
 	// Service
 	CreateService(ctx context.Context, s *model.Service) error
 	ListServices(ctx context.Context) ([]*model.Service, error)
@@ -13,6 +16,8 @@ type Repository interface {
 	GetServiceByHash(ctx context.Context, hash string) (*model.Service, error)
 	UpdateService(ctx context.Context, s *model.Service) error
 	UpdateServiceSortOrder(ctx context.Context, id int64, sortOrder int) error
+	// UpdateServiceCert 只写回证书到期信息与告警等级，避免覆盖并发的状态变更
+	UpdateServiceCert(ctx context.Context, id int64, certExpiresAt string, notifyLevel int) error
 	DeleteService(ctx context.Context, id int64) error
 
 	// Heartbeat
@@ -22,6 +27,8 @@ type Repository interface {
 	BatchGetLatestHeartbeats(ctx context.Context, serviceIDs []int64) (map[int64]*model.Heartbeat, error)
 	GetLatencyBuckets(ctx context.Context, serviceID int64, since string, bucketSeconds, maxBucket int) ([]*model.LatencyBucket, error)
 	GetLatencyStats(ctx context.Context, serviceID int64, since string) (*model.LatencyStats, error)
+	// GetLatencyHeatmap 按「日期 × 小时」（北京时间）聚合延迟，供热力图使用
+	GetLatencyHeatmap(ctx context.Context, serviceID int64, since string) ([]*model.LatencyHeatmapCell, error)
 	ListHeartbeats(ctx context.Context, serviceID int64, statusFilter string, page, limit int) ([]*model.LogEntry, int64, error)
 	DeleteOldHeartbeats(ctx context.Context, before string) error
 
@@ -78,7 +85,8 @@ type Repository interface {
 	GetApiKey(ctx context.Context, id int64) (*model.ApiKey, error)
 	GetApiKeyByKey(ctx context.Context, key string) (*model.ApiKey, error)
 	UpdateApiKeyLastUsed(ctx context.Context, id int64, ip string) error
-	UpdateApiKeyName(ctx context.Context, id int64, name string) error
+	// UpdateApiKey 更新名称、权限范围与每分钟限流
+	UpdateApiKey(ctx context.Context, id int64, name, scope string, rateLimitPerMinute int) error
 	DeleteApiKey(ctx context.Context, id int64) error
 
 	// Subscriber
@@ -94,6 +102,15 @@ type Repository interface {
 	GetServer(ctx context.Context, id int64) (*model.Server, error)
 	UpdateServer(ctx context.Context, s *model.Server) error
 	DeleteServer(ctx context.Context, id int64) error
+
+	// ServiceFolder 服务分组（服务聚合文件夹）
+	CreateServiceFolder(ctx context.Context, f *model.ServiceFolder) error
+	ListServiceFolders(ctx context.Context) ([]*model.ServiceFolder, error)
+	GetServiceFolder(ctx context.Context, id int64) (*model.ServiceFolder, error)
+	UpdateServiceFolder(ctx context.Context, f *model.ServiceFolder) error
+	DeleteServiceFolder(ctx context.Context, id int64) error
+	CountServicesInFolder(ctx context.Context, id int64) (int, error)
+	AssignServiceFolder(ctx context.Context, serviceID int64, folderID *int64) error
 
 	// ProbeTask
 	CreateProbeTask(ctx context.Context, t *model.ProbeTask) error

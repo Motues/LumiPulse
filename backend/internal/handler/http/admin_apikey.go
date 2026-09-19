@@ -20,14 +20,16 @@ func (h *Handler) ListApiKeys(c *gin.Context) {
 
 	// 不返回完整密钥
 	type safeKey struct {
-		ID         int64  `json:"id"`
-		Name       string `json:"name"`
-		MaskedKey  string `json:"maskedKey"`
-		ExpiresAt  string `json:"expiresAt"`
-		LastUsedAt string `json:"lastUsedAt,omitempty"`
-		LastUsedIP string `json:"lastUsedIP,omitempty"`
-		IsActive   bool   `json:"isActive"`
-		CreatedAt  string `json:"createdAt"`
+		ID                 int64  `json:"id"`
+		Name               string `json:"name"`
+		MaskedKey          string `json:"maskedKey"`
+		ExpiresAt          string `json:"expiresAt"`
+		LastUsedAt         string `json:"lastUsedAt,omitempty"`
+		LastUsedIP         string `json:"lastUsedIP,omitempty"`
+		IsActive           bool   `json:"isActive"`
+		Scope              string `json:"scope"`
+		RateLimitPerMinute int    `json:"rateLimitPerMinute"`
+		CreatedAt          string `json:"createdAt"`
 	}
 	result := make([]safeKey, len(keys))
 	for i, k := range keys {
@@ -36,14 +38,16 @@ func (h *Handler) ListApiKeys(c *gin.Context) {
 			masked = masked[:6] + "****" + masked[len(masked)-4:]
 		}
 		result[i] = safeKey{
-			ID:         k.ID,
-			Name:       k.Name,
-			MaskedKey:  masked,
-			ExpiresAt:  k.ExpiresAt,
-			LastUsedAt: k.LastUsedAt,
-			LastUsedIP: k.LastUsedIP,
-			IsActive:   k.IsActive,
-			CreatedAt:  k.CreatedAt,
+			ID:                 k.ID,
+			Name:               k.Name,
+			MaskedKey:          masked,
+			ExpiresAt:          k.ExpiresAt,
+			LastUsedAt:         k.LastUsedAt,
+			LastUsedIP:         k.LastUsedIP,
+			IsActive:           k.IsActive,
+			Scope:              normalizeApiKeyScope(k.Scope),
+			RateLimitPerMinute: normalizeRateLimit(k.RateLimitPerMinute),
+			CreatedAt:          k.CreatedAt,
 		}
 	}
 
@@ -69,6 +73,9 @@ func (h *Handler) CreateApiKey(c *gin.Context) {
 		Key:       key,
 		KeyPrefix: prefix,
 		ExpiresAt: req.ExpiresAt,
+		// 未指定范围时按最小权限处理
+		Scope:              normalizeApiKeyScope(req.Scope),
+		RateLimitPerMinute: normalizeRateLimit(req.RateLimitPerMinute),
 	}
 
 	if err := h.Repo.CreateApiKey(c.Request.Context(), k); err != nil {
@@ -81,17 +88,19 @@ func (h *Handler) CreateApiKey(c *gin.Context) {
 		Code:    201,
 		Message: "密钥创建成功",
 		Data: gin.H{
-			"id":        k.ID,
-			"name":      k.Name,
-			"key":       key,
-			"keyPrefix": prefix,
-			"expiresAt": k.ExpiresAt,
-			"createdAt": k.CreatedAt,
+			"id":                 k.ID,
+			"name":               k.Name,
+			"key":                key,
+			"keyPrefix":          prefix,
+			"expiresAt":          k.ExpiresAt,
+			"scope":              k.Scope,
+			"rateLimitPerMinute": k.RateLimitPerMinute,
+			"createdAt":          k.CreatedAt,
 		},
 	})
 }
 
-// UpdateApiKey 更新 API 密钥（名称）
+// UpdateApiKey 更新 API 密钥（名称 / 权限范围 / 每分钟限流）
 func (h *Handler) UpdateApiKey(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -100,23 +109,44 @@ func (h *Handler) UpdateApiKey(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		Name string `json:"name" binding:"required"`
-	}
+	var req model.UpdateApiKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "请提供密钥名称"})
 		return
 	}
 
-	if err := h.Repo.UpdateApiKeyName(c.Request.Context(), id, req.Name); err != nil {
+	existing, err := h.Repo.GetApiKey(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "密钥不存在"})
+		return
+	}
+
+	scope := normalizeApiKeyScope(existing.Scope)
+	if req.Scope != nil {
+		scope = normalizeApiKeyScope(*req.Scope)
+	}
+	rateLimit := normalizeRateLimit(existing.RateLimitPerMinute)
+	if req.RateLimitPerMinute != nil {
+		rateLimit = normalizeRateLimit(*req.RateLimitPerMinute)
+	}
+
+	if err := h.Repo.UpdateApiKey(c.Request.Context(), id, req.Name, scope, rateLimit); err != nil {
 		utils.Error("update api key %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "更新密钥失败"})
 		return
 	}
 
+	auditLog("apikey.update", "id="+idStr+" scope="+scope)
+
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "密钥已更新",
+		Data: gin.H{
+			"id":                 id,
+			"name":               req.Name,
+			"scope":              scope,
+			"rateLimitPerMinute": rateLimit,
+		},
 	})
 }
 

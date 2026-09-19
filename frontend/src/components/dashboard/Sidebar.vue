@@ -4,8 +4,19 @@ import { api } from '../../api/client'
 import { version } from '../../../package.json'
 import { siteName, siteIcon } from '../../composables/useSiteConfig'
 import { useDarkMode } from '../../composables/useDarkMode'
+import { useI18n } from '../../composables/useI18n'
 
+const { t } = useI18n()
 const { isDark, themeMode, toggle: toggleDark } = useDarkMode()
+
+/** 主题按钮文案，复用公开页 header.theme.* 文案 */
+const themeLabel = computed(() =>
+  themeMode.value === 'system'
+    ? t('header.theme.system')
+    : themeMode.value === 'dark'
+      ? t('header.theme.dark')
+      : t('header.theme.light'),
+)
 
 const props = defineProps<{
   collapsed: boolean
@@ -129,7 +140,7 @@ function onItemLeave(e: MouseEvent) {
         style="color: var(--text-color);"
         :class="isEffectivelyCollapsed ? 'max-w-0 opacity-0' : 'max-w-48 opacity-100'"
       >
-        <div class="mb-1" style="opacity: 0.6;">版本 v{{ version }}</div>
+        <div class="mb-1" style="opacity: 0.6;">{{ t('admin.sidebar.versionLabel', { version }) }}</div>
         <div class="mb-2">
           <a
             href="https://github.com/Motues/LumiPulse"
@@ -151,7 +162,7 @@ function onItemLeave(e: MouseEvent) {
           <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
           </svg>
-          {{ themeMode === 'system' ? '跟随系统' : themeMode === 'dark' ? '深色模式' : '浅色模式' }}
+          {{ themeLabel }}
         </button>
       </div>
     </div>

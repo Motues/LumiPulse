@@ -5,11 +5,13 @@ import { api } from '../api/client'
 import { useAuth } from '../stores/auth'
 import { siteName, siteIcon } from '../composables/useSiteConfig'
 import { useToast } from '../composables/useToast'
+import { useI18n } from '../composables/useI18n'
 import Toast from '../components/dashboard/Toast.vue'
 
 const router = useRouter()
 const { setToken } = useAuth()
 const { show: toast } = useToast()
+const { t } = useI18n()
 
 const username = ref('')
 const password = ref('')
@@ -17,7 +19,7 @@ const loading = ref(false)
 
 async function handleLogin() {
   if (!username.value || !password.value) {
-    toast('请输入用户名和密码')
+    toast(t('admin.login.credentialsRequired'))
     return
   }
   loading.value = true
@@ -30,7 +32,7 @@ async function handleLogin() {
       router.push('/dashboard')
     }
   } catch (e: any) {
-    toast(e.message || '登录失败')
+    toast(e.message || t('admin.login.failed'))
   } finally {
     loading.value = false
   }
@@ -46,32 +48,32 @@ async function handleLogin() {
           <img v-else src="/assets/logo.svg" class="w-8 h-8 object-contain" />
           <span class="text-2xl font-bold tracking-tight" style="color: var(--text-color);">{{ siteName }}</span>
         </div>
-        <p class="text-sm" style="color: var(--text-color); opacity: 0.5;">管理后台登录</p>
+        <p class="text-sm" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.login.subtitle') }}</p>
       </div>
 
       <div class="rounded-xl p-6" style="border: 1px solid var(--button-border-color);">
         <form @submit.prevent="handleLogin" class="space-y-4">
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">用户名</label>
-            <input v-model="username" type="text" placeholder="请输入用户名"
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">{{ t('admin.login.username') }}</label>
+            <input v-model="username" type="text" :placeholder="t('admin.login.usernamePlaceholder')"
                    class="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                    style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">密码</label>
-            <input v-model="password" type="password" placeholder="请输入密码"
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color);">{{ t('admin.login.password') }}</label>
+            <input v-model="password" type="password" :placeholder="t('admin.login.passwordPlaceholder')"
                    class="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                    style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
           </div>
           <button type="submit" :disabled="loading"
                   class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white font-medium rounded-lg text-sm transition-colors">
-            {{ loading ? '登录中...' : '登录' }}
+            {{ loading ? t('admin.login.submitting') : t('admin.login.submit') }}
           </button>
         </form>
       </div>
 
       <div class="text-center mt-6">
-        <a href="/" class="text-sm transition-opacity opacity-40 hover:opacity-100" style="color: var(--text-color);">返回状态页</a>
+        <a href="/" class="text-sm transition-opacity opacity-40 hover:opacity-100" style="color: var(--text-color);">{{ t('common.backToStatus') }}</a>
       </div>
     </div>
     <Toast />

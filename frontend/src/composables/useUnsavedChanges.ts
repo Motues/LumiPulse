@@ -1,4 +1,5 @@
 import { ref, watch, type Ref } from 'vue'
+import { t } from './useI18n'
 
 export function useUnsavedChanges(formRef: Ref<Record<string, any>>, storageKey: string) {
   const isDirty = ref(false)
@@ -18,7 +19,7 @@ export function useUnsavedChanges(formRef: Ref<Record<string, any>>, storageKey:
     if (isDirty.value) {
       // Save to localStorage before closing
       localStorage.setItem(storageKey, JSON.stringify(formRef.value))
-      return window.confirm('有未保存的更改，确定要关闭吗？')
+      return window.confirm(t('common.confirmUnsavedChanges'))
     }
     return true
   }

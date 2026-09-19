@@ -83,12 +83,12 @@ func (h *Handler) UpdateServer(c *gin.Context) {
 	if req.Description != "" {
 		svr.Description = req.Description
 	}
-		if req.AutoMerge != nil {
-			svr.AutoMerge = *req.AutoMerge
-		}
-		if req.AutoMergeThreshold > 0 {
-			svr.AutoMergeThreshold = req.AutoMergeThreshold
-		}
+	if req.AutoMerge != nil {
+		svr.AutoMerge = *req.AutoMerge
+	}
+	if req.AutoMergeThreshold > 0 {
+		svr.AutoMergeThreshold = req.AutoMergeThreshold
+	}
 
 	if err := h.Repo.UpdateServer(c.Request.Context(), svr); err != nil {
 		utils.Error("update server %d failed: %v", id, err)

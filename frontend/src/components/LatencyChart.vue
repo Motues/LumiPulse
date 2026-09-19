@@ -14,6 +14,9 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const hoverIndex = ref(-1)
+// 鼠标在 SVG 坐标系中的位置：浮窗跟随鼠标，而不是跳到最近的曲线上
+const pointerX = ref(0)
+const pointerY = ref(0)
 const pointCount = computed(() => props.latencies.length)
 
 // ---- SVG 图表常量 ----
@@ -230,12 +233,15 @@ const hover = computed(() => {
   const boxW = 108
   const boxH = 46
   const gap = 14
-  const tx = Math.max(padL + boxW / 2, Math.min(chartW - padR - boxW / 2, x))
-  let bottom = y - gap
+  // 浮窗跟随鼠标：横向以鼠标位置居中，纵向默认放在鼠标上方，
+  // 顶部空间不足时翻到下方；两边都夹紧在绘图区内，避免溢出。
+  const anchorX = Math.max(padL + boxW / 2, Math.min(chartW - padR - boxW / 2, pointerX.value))
+  const anchorY = Math.max(padT, Math.min(plotBottom, pointerY.value))
+  let bottom = anchorY - gap
   let above = true
   if (bottom - boxH < padT - 4) {
     above = false
-    bottom = y + gap + boxH
+    bottom = anchorY + gap + boxH
   }
 
   return {
@@ -243,7 +249,7 @@ const hover = computed(() => {
     time: labelAt(i),
     label: hasData ? `${props.latencies[i]}ms` : t('service.noData'),
     statusLabel: statusLabel(st),
-    box: { x: tx - boxW / 2, y: bottom - boxH, w: boxW, h: boxH },
+    box: { x: anchorX - boxW / 2, y: bottom - boxH, w: boxW, h: boxH },
     stemY: above ? bottom : bottom - boxH,
   }
 })
@@ -255,7 +261,10 @@ function onMouseMove(e: MouseEvent) {
   const rect = svg.getBoundingClientRect()
   if (rect.width === 0) return
   const scaleX = chartW / rect.width
+  const scaleY = chartH / rect.height
   const mouseX = (e.clientX - rect.left) * scaleX
+  pointerX.value = mouseX
+  pointerY.value = (e.clientY - rect.top) * scaleY
   if (mouseX < padL - 12 || mouseX > chartW - padR + 12) {
     hoverIndex.value = -1
     return

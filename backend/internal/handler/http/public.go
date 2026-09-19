@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"lumipluse-backend/internal/config"
 	"lumipluse-backend/internal/model"
 	"lumipluse-backend/internal/pkg/utils"
@@ -80,18 +81,157 @@ func (h *Handler) buildServiceSummaries(c *gin.Context, services []*model.Servic
 			latency = hb.Latency
 		}
 		summaries = append(summaries, model.ServiceSummary{
-			ID:         svc.ID,
-			PublicHash: svc.PublicHash,
-			Name:       svc.Name,
-			Status:     statusOf(svc.ID),
-			URL:        svc.URL,
-			Type:       svc.Type,
-			Uptime:     uptimeMap[svc.ID],
-			Latency:    latency,
-			Interval:   svc.Interval,
+			ID:            svc.ID,
+			PublicHash:    svc.PublicHash,
+			FolderID:      svc.FolderID,
+			Name:          svc.Name,
+			Status:        statusOf(svc.ID),
+			URL:           svc.URL,
+			Type:          svc.Type,
+			Uptime:        uptimeMap[svc.ID],
+			Latency:       latency,
+			Interval:      svc.Interval,
+			CertExpiresAt: svc.CertExpiresAt,
 		})
 	}
 	return summaries
+}
+
+// buildFolderSummaries 把服务按分组聚合成公开首页需要的融合条目。
+//
+// 融合口径（与单个服务一致，避免两处跑偏）：
+//   - 可用率按探测次数加权（用每日汇总的 up/down 计数），而不是各服务可用率的简单平均；
+//   - 响应时间只统计成功样本并同样按次数加权，否则慢服务会被探测少的服务带偏；
+//   - 状态取最严重：全部正常 → operational，全部故障 → outage，其余 → degraded。
+//
+// folderIDs 为 nil 表示不过滤分组（管理端用）；给定集合时只返回其中的分组（公开首页只给可见分组）。
+func (h *Handler) buildFolderSummaries(c *gin.Context, services []*model.Service, summaries []model.ServiceSummary, folderIDs map[int64]bool) []model.FolderSummary {
+	if len(services) == 0 {
+		return []model.FolderSummary{}
+	}
+
+	svcIDs := make([]int64, len(services))
+	for i, svc := range services {
+		svcIDs[i] = svc.ID
+	}
+	// 融合可用率/延迟需要探测次数与成功样本，直接从每日汇总取
+	dailiesMap, err := h.Repo.BatchGetServiceDailies(c.Request.Context(), svcIDs, 90)
+	if err != nil {
+		dailiesMap = map[int64][]*model.ServiceDaily{}
+	}
+
+	summaryByService := make(map[int64]model.ServiceSummary, len(summaries))
+	for _, s := range summaries {
+		summaryByService[s.ID] = s
+	}
+
+	type bucket struct {
+		folderID int64
+		services []model.ServiceSummary
+		up       int
+		down     int
+		latency  int
+		latencyN int
+	}
+	buckets := make(map[int64]*bucket)
+	order := make([]int64, 0)
+
+	for _, svc := range services {
+		if svc.FolderID == nil || *svc.FolderID <= 0 {
+			continue
+		}
+		fid := *svc.FolderID
+		if folderIDs != nil && !folderIDs[fid] {
+			continue
+		}
+		summary, ok := summaryByService[svc.ID]
+		if !ok {
+			continue
+		}
+		b, exists := buckets[fid]
+		if !exists {
+			b = &bucket{folderID: fid}
+			buckets[fid] = b
+			order = append(order, fid)
+		}
+		b.services = append(b.services, summary)
+		for _, d := range dailiesMap[svc.ID] {
+			b.up += d.UptimeCount
+			b.down += d.DowntimeCount
+			b.latency += d.TotalLatency
+			b.latencyN += d.UptimeCount
+		}
+	}
+
+	if len(order) == 0 {
+		return []model.FolderSummary{}
+	}
+
+	folders, err := h.Repo.ListServiceFolders(c.Request.Context())
+	if err != nil {
+		folders = nil
+	}
+	folderByID := make(map[int64]*model.ServiceFolder, len(folders))
+	for _, f := range folders {
+		folderByID[f.ID] = f
+	}
+
+	result := make([]model.FolderSummary, 0, len(order))
+	for _, fid := range order {
+		b := buckets[fid]
+		meta := folderByID[fid]
+		if meta == nil {
+			// 分组已被删除但服务还挂着旧 ID（理论上不会发生，这里兜底跳过）
+			continue
+		}
+
+		uptime := 100.0
+		if total := b.up + b.down; total > 0 {
+			uptime = float64(b.up) / float64(total) * 100
+		}
+		latency := 0
+		if b.latencyN > 0 {
+			latency = b.latency / b.latencyN
+		}
+
+		upCount, outageCount := 0, 0
+		for _, s := range b.services {
+			switch s.Status {
+			case "operational":
+				upCount++
+			case "outage":
+				outageCount++
+			}
+		}
+		status := "degraded"
+		if outageCount == len(b.services) {
+			status = "outage"
+		} else if upCount == len(b.services) {
+			status = "operational"
+		}
+
+		result = append(result, model.FolderSummary{
+			ID:          fid,
+			Name:        meta.Name,
+			Description: meta.Description,
+			Status:      status,
+			Uptime:      uptime,
+			Latency:     latency,
+			Services:    b.services,
+		})
+	}
+	return result
+}
+
+// visibleFolders 返回允许在公开首页展示的分组 ID 集合
+func visibleFolders(folders []*model.ServiceFolder) map[int64]bool {
+	visible := make(map[int64]bool, len(folders))
+	for _, f := range folders {
+		if f.ShowOnHomepage {
+			visible[f.ID] = true
+		}
+	}
+	return visible
 }
 
 // batchCalcUptime computes uptime for all given service IDs in a single query.
@@ -132,6 +272,31 @@ func (h *Handler) Health(c *gin.Context) {
 		Message: "ok",
 		Data: gin.H{
 			"status":  "healthy",
+			"version": h.Version,
+		},
+	})
+}
+
+// Ready readiness 探针。与 /health（liveness，只证明进程还在）不同，
+// 这里会真正探测数据库连通性；数据库不可用时返回 503，编排系统应停止向该实例导流。
+func (h *Handler) Ready(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+
+	if err := h.Repo.Ping(ctx); err != nil {
+		c.JSON(http.StatusServiceUnavailable, model.APIResponse{
+			Code:    503,
+			Message: "database unavailable",
+			Data:    gin.H{"status": "unavailable"},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "ok",
+		Data: gin.H{
+			"status":  "ready",
 			"version": h.Version,
 		},
 	})
@@ -178,6 +343,33 @@ func (h *Handler) Subscribe(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, model.APIResponse{Code: 201, Message: "订阅成功"})
 }
+
+// sanitizeIncidentPostmortem 按事件自己的开关决定是否公开复盘内容。
+// 未勾选「对外公开」时清空根因 / 处理措施 / 文档链接，
+// 这样公开接口（总览、事件列表、事件详情）都不可能把内部信息带出去。
+// 同时清空「确认人」等内部运维信息：公开页面只展示事件本身的状态。
+func sanitizeIncidentPostmortem(inc *model.Incident) {
+	if inc == nil {
+		return
+	}
+	inc.AcknowledgedBy = ""
+	inc.AcknowledgedAt = ""
+	if inc.PostmortemPublic {
+		return
+	}
+	inc.RootCause = ""
+	inc.Resolution = ""
+	inc.PostmortemURL = ""
+}
+
+// sanitizeIncidentPostmortems 批量版本
+func sanitizeIncidentPostmortems(incidents []*model.Incident) {
+	for _, inc := range incidents {
+		sanitizeIncidentPostmortem(inc)
+	}
+}
+
+// GetSummary 获取系统整体健康状况
 func (h *Handler) GetSummary(c *gin.Context) {
 	if cached := h.getCached(); cached != nil {
 		c.JSON(http.StatusOK, model.APIResponse{
@@ -192,13 +384,20 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	// Filter to only homepage-visible services
-	services = visibleServices(services)
+	folders, err := h.Repo.ListServiceFolders(c.Request.Context())
+	if err != nil {
+		folders = nil
+	}
+
+	// Filter to only homepage-visible services（分组可见性会覆盖服务自身的开关）
+	services = visibleServices(services, folders)
 
 	activeIncidents, err := h.Repo.ListActiveIncidents(c.Request.Context())
 	if err != nil {
 		activeIncidents = nil
 	}
+	// 复盘内容默认不对外，公开前统一过滤
+	sanitizeIncidentPostmortems(activeIncidents)
 
 	activeMaints, err := h.Repo.ListActiveMaintenances(c.Request.Context())
 	if err != nil {
@@ -231,6 +430,9 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		return reconcileStatus(activeIncidents, id)
 	})
 
+	// 服务分组的融合结果（只包含首页可见的分组）
+	folderSummaries := h.buildFolderSummaries(c, services, serviceSummaries, visibleFolders(folders))
+
 	// Calculate overall status based on reconciled service status
 	overall := "operational"
 	hasDegraded := false
@@ -248,22 +450,19 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		overall = "degraded"
 	}
 
+	response := model.SummaryResponse{
+		OverallStatus: overall,
+		Services:      serviceSummaries,
+		Folders:       folderSummaries,
+		Incidents:     activeIncidents,
+		Maintenances:  activeMaints,
+	}
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
 		Message: "ok",
-		Data: model.SummaryResponse{
-			OverallStatus: overall,
-			Services:      serviceSummaries,
-			Incidents:     activeIncidents,
-			Maintenances:  activeMaints,
-		},
+		Data:    response,
 	})
-	h.setCache(model.SummaryResponse{
-		OverallStatus: overall,
-		Services:      serviceSummaries,
-		Incidents:     activeIncidents,
-		Maintenances:  activeMaints,
-	})
+	h.setCache(response)
 }
 
 // ListServices 获取所有监控服务的当前状态列表
@@ -274,8 +473,13 @@ func (h *Handler) ListServices(c *gin.Context) {
 		return
 	}
 
-	// Filter to only homepage-visible services
-	services = visibleServices(services)
+	folders, err := h.Repo.ListServiceFolders(c.Request.Context())
+	if err != nil {
+		folders = nil
+	}
+
+	// Filter to only homepage-visible services（分组可见性会覆盖服务自身的开关）
+	services = visibleServices(services, folders)
 
 	activeIncidents, err := h.Repo.ListActiveIncidents(c.Request.Context())
 	if err != nil {
@@ -424,6 +628,64 @@ func (h *Handler) GetServiceLatency(c *gin.Context) {
 	})
 }
 
+// GetServiceLatencyHeatmap 获取服务的响应时间热力图数据（按「日期 × 小时」聚合）。
+// 与延迟接口的区别：只返回聚合后的格子，7 天原始心跳（约 2000 个 5 分钟桶）无需下发。
+func (h *Handler) GetServiceLatencyHeatmap(c *gin.Context) {
+	svc, ok := h.resolveServiceByHash(c)
+	if !ok {
+		return
+	}
+
+	// 上限与心跳保留天数对齐
+	maxDays := config.GlobalConfig.HeartbeatRetention()
+	days := 7
+	if d := c.Query("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
+			days = parsed
+		}
+	}
+	if days > maxDays {
+		days = maxDays
+	}
+	if days < 1 {
+		days = 1
+	}
+
+	// 以北京时间的「今天 00:00」为终点，向前取 days 天（含今天）
+	loc := time.FixedZone("CST", 8*3600)
+	now := time.Now().In(loc)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	from := today.AddDate(0, 0, -(days - 1))
+
+	cells, err := h.Repo.GetLatencyHeatmap(c.Request.Context(), svc.ID,
+		from.UTC().Format("2006-01-02T15:04:05Z"))
+	if err != nil {
+		cells = nil
+	}
+	if cells == nil {
+		cells = []*model.LatencyHeatmapCell{}
+	}
+
+	maxAvg := 0
+	for _, cell := range cells {
+		if cell.Avg > maxAvg {
+			maxAvg = cell.Avg
+		}
+	}
+
+	c.JSON(http.StatusOK, model.APIResponse{
+		Code:    200,
+		Message: "ok",
+		Data: model.LatencyHeatmapResponse{
+			From:   from.Format("2006-01-02"),
+			To:     today.Format("2006-01-02"),
+			Days:   days,
+			MaxAvg: maxAvg,
+			Cells:  cells,
+		},
+	})
+}
+
 // GetPublicIncident 获取单个故障事件详情（含更新时间线）
 // 公开访问使用随机 hash 而非自增 ID，避免暴露数据库内部标识。
 func (h *Handler) GetPublicIncident(c *gin.Context) {
@@ -450,6 +712,7 @@ func (h *Handler) GetPublicIncident(c *gin.Context) {
 		}
 	}
 	inc.Updates = filtered
+	sanitizeIncidentPostmortem(inc)
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
@@ -504,6 +767,8 @@ func (h *Handler) ListIncidents(c *gin.Context) {
 	if incidents == nil {
 		incidents = []*model.Incident{}
 	}
+	// 复盘内容默认不对外
+	sanitizeIncidentPostmortems(incidents)
 
 	c.JSON(http.StatusOK, model.APIResponse{
 		Code:    200,
@@ -629,10 +894,20 @@ func buildDailyPairs(dailies []*model.ServiceDaily, incidents []*model.Incident,
 	return pairs
 }
 
-// visibleServices 返回首页可见的服务
-func visibleServices(services []*model.Service) []*model.Service {
+// visibleServices 返回首页可见的服务。
+// 分组的可见性优先：属于「首页可见分组」的服务即便自身关闭了 show_on_homepage
+// 也会随分组一起展示（聚合条目需要完整明细）；所属分组不可见或分组已被删除的服务
+// 不会展示。未分组的服务仍按自身的 show_on_homepage 判断。
+func visibleServices(services []*model.Service, folders []*model.ServiceFolder) []*model.Service {
+	visibleFolders := visibleFolders(folders)
 	visible := make([]*model.Service, 0, len(services))
 	for _, svc := range services {
+		if svc.FolderID != nil && *svc.FolderID > 0 {
+			if visibleFolders[*svc.FolderID] {
+				visible = append(visible, svc)
+			}
+			continue
+		}
 		if svc.ShowOnHomepage {
 			visible = append(visible, svc)
 		}
@@ -705,7 +980,11 @@ func (h *Handler) batchDailyStats(c *gin.Context, days int, onlyVisible bool) ([
 		return nil, err
 	}
 	if onlyVisible {
-		services = visibleServices(services)
+		folders, err := h.Repo.ListServiceFolders(c.Request.Context())
+		if err != nil {
+			folders = nil
+		}
+		services = visibleServices(services, folders)
 	}
 
 	svcIDs := make([]int64, len(services))

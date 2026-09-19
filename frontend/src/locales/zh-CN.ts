@@ -42,6 +42,9 @@ export const zhCN: Record<string, string> = {
   'home.invalidIncident': '无效的事件标识',
   'home.loadIncidentFailed': '加载事件详情失败',
   'home.serviceLabel': '服务 #{id}',
+  'home.folderExpand': '展开分组内的服务',
+  'home.folderCollapse': '收起分组，只看融合结果',
+  'home.folderServiceCount': '{n} 个服务',
   'home.poweredBy': 'Powered By LumiPulse',
 
   // 服务状态
@@ -64,6 +67,10 @@ export const zhCN: Record<string, string> = {
   'incident.impact.minor': '轻微',
   'incident.impact.major': '重大',
   'incident.impact.critical': '严重',
+  'incident.postmortem': '事后复盘',
+  'incident.rootCause': '根因',
+  'incident.resolution': '处理措施',
+  'incident.postmortemDoc': '查看复盘文档',
 
   // 服务详情
   'service.uptime': '在线率',
@@ -79,6 +86,18 @@ export const zhCN: Record<string, string> = {
   'service.noData': '暂无数据',
   'service.history': '服务历史',
   'service.maintenanceOngoing': '维护中',
+  'service.certExpiry': '证书到期',
+  'service.certRemaining': '剩余 {n} 天',
+  'service.certExpired': '已过期',
+  'service.heatmap': '响应时间热力图',
+  'service.heatmapHint': '按「日期 × 小时」展示平均响应时间，颜色越红越慢；右上角红点表示该小时出现过失败探测。',
+  'service.heatmapAvg': '平均响应',
+  'service.heatmapSamples': '成功样本',
+  'service.heatmapFailures': '失败探测',
+  'service.heatmapNoData': '无数据',
+  'service.heatmapAllFailed': '全部失败',
+  'service.heatmapFast': '快',
+  'service.heatmapSlow': '慢',
 
   // 延迟图表
   'chart.normal': '正常',
@@ -101,6 +120,22 @@ export const zhCN: Record<string, string> = {
   'subscribe.emptyMeansAll': '留空则订阅所有服务',
   'subscribe.feedDesc': '复制以下链接到 RSS 阅读器订阅状态更新。',
   'subscribe.copied': '链接已复制到剪贴板',
+
+  // 退订 / 订阅偏好管理
+  'unsubscribe.title': '订阅管理',
+  'unsubscribe.subtitle': '当前邮箱：{email}',
+  'unsubscribe.preferences': '订阅偏好',
+  'unsubscribe.preferencesHint': '选择要接收通知的服务；「订阅全部服务」会包含将来新增的服务。',
+  'unsubscribe.allServices': '订阅全部服务',
+  'unsubscribe.someServices': '只订阅指定服务',
+  'unsubscribe.noServices': '暂无可选服务',
+  'unsubscribe.save': '保存偏好',
+  'unsubscribe.saved': '订阅偏好已更新。',
+  'unsubscribe.action': '退订全部通知',
+  'unsubscribe.confirm': '确定要退订吗？退订后将不再收到任何状态通知。',
+  'unsubscribe.doneUnsubscribed': '已退订',
+  'unsubscribe.doneUnsubscribedHint': '您不会再收到状态通知；如需重新订阅，可在状态页再次提交邮箱。',
+  'unsubscribe.invalidLink': '退订链接无效或已过期，请在邮件中重新点击退订链接。',
 
   // 时长
   'duration.minutes': '{n}分钟',

@@ -18,9 +18,11 @@ func (r *repo) CreateIncident(ctx context.Context, inc *model.Incident) error {
 	if inc.ParentID != nil {
 		parentID = *inc.ParentID
 	}
-	query := `INSERT INTO Incident (public_hash, service_id, title, impact, status, affected_services, parent_id, resolved_at, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := r.db.ExecContext(ctx, query, inc.PublicHash, inc.ServiceID, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, nil, now, now)
+	query := `INSERT INTO Incident (public_hash, service_id, title, impact, status, affected_services, parent_id, resolved_at,
+	                   root_cause, resolution, postmortem_url, postmortem_public, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := r.db.ExecContext(ctx, query, inc.PublicHash, inc.ServiceID, inc.Title, inc.Impact, inc.Status,
+		inc.AffectedServices, parentID, nil, inc.RootCause, inc.Resolution, inc.PostmortemURL, inc.PostmortemPublic, now, now)
 	if err != nil {
 		return err
 	}
@@ -139,8 +141,14 @@ func (r *repo) UpdateIncident(ctx context.Context, inc *model.Incident) error {
 		resolvedAt = *inc.ResolvedAt
 	}
 
-	query := `UPDATE Incident SET title=?, impact=?, status=?, affected_services=?, parent_id=?, resolved_at=?, updated_at=? WHERE id=?`
-	_, err := r.db.ExecContext(ctx, query, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, resolvedAt, now, inc.ID)
+	query := `UPDATE Incident SET title=?, impact=?, status=?, affected_services=?, parent_id=?, resolved_at=?,
+	             root_cause=?, resolution=?, postmortem_url=?, postmortem_public=?,
+	             acknowledged=?, acknowledged_at=?, acknowledged_by=?, escalation_count=?, last_escalated_at=?,
+	             updated_at=? WHERE id=?`
+	_, err := r.db.ExecContext(ctx, query, inc.Title, inc.Impact, inc.Status, inc.AffectedServices, parentID, resolvedAt,
+		inc.RootCause, inc.Resolution, inc.PostmortemURL, inc.PostmortemPublic,
+		inc.Acknowledged, inc.AcknowledgedAt, inc.AcknowledgedBy, inc.EscalationCount, inc.LastEscalatedAt,
+		now, inc.ID)
 	if err != nil {
 		return err
 	}

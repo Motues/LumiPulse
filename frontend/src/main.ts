@@ -6,6 +6,14 @@ import './style.css'
 // 必须在挂载前完成，否则首屏会先渲染出默认语言再切换
 import './locales/zh-CN'
 import './locales/en-US'
+import './locales/adminSettings'
+import './locales/adminNotify'
+import './locales/adminAccount'
+import './locales/adminIncident'
+import './locales/adminService'
+import './locales/adminFolder'
+import './locales/adminNav'
+import './locales/commonApp'
 import { initLocale } from './composables/useI18n'
 
 initLocale()

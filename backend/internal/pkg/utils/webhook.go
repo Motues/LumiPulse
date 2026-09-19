@@ -27,6 +27,10 @@ const (
 const (
 	WebhookEventDown = "down" // 服务异常（自动创建事件）
 	WebhookEventUp   = "up"   // 服务恢复
+	// WebhookEventMaintenance 维护计划即将开始提醒（由提前量配置控制）
+	WebhookEventMaintenance = "maintenance"
+	// WebhookEventCertExpiring HTTPS 证书即将到期（剩余 < 30 天 / < 7 天各一次）
+	WebhookEventCertExpiring = "cert_expiring"
 )
 
 // 签名相关请求头。时间戳单独放在头里，接收端可据此拒绝重放请求。
@@ -121,28 +125,50 @@ func webhookEventEnabled(event string) bool {
 
 // webhookColor 按事件类型给出强调色，Slack / Discord 都用它渲染左侧色条
 func webhookColor(event string) int {
-	if event == WebhookEventUp {
+	switch event {
+	case WebhookEventUp:
 		return 0x34a761 // 绿色：恢复
+	case WebhookEventMaintenance:
+		return 0x2f80ed // 蓝色：维护提醒
+	case WebhookEventCertExpiring:
+		return 0xfda305 // 橙色：证书即将到期
+	default:
+		return 0xdf2d2a // 红色：异常
 	}
-	return 0xdf2d2a // 红色：异常
 }
 
 // webhookTitle 事件标题，例如「服务异常告警: API」
 func webhookTitle(evt WebhookEvent) string {
-	if evt.Event == WebhookEventUp {
+	switch evt.Event {
+	case WebhookEventUp:
 		return fmt.Sprintf("服务恢复通知: %s", evt.Service)
+	case WebhookEventMaintenance:
+		return fmt.Sprintf("维护提醒: %s", evt.Service)
+	case WebhookEventCertExpiring:
+		return fmt.Sprintf("证书即将到期: %s", evt.Service)
+	default:
+		return fmt.Sprintf("服务异常告警: %s", evt.Service)
 	}
-	return fmt.Sprintf("服务异常告警: %s", evt.Service)
+}
+
+// webhookServiceLabel 载荷中标识「主体」的字段名。
+// 维护提醒的主体是维护计划标题，而不是服务名，因此单独换一个字段名。
+func webhookServiceLabel(event string) string {
+	if event == WebhookEventMaintenance {
+		return "维护"
+	}
+	return "服务"
 }
 
 // buildWebhookPayload 按渠道生成请求体
 func buildWebhookPayload(webhookType string, evt WebhookEvent) ([]byte, error) {
 	title := webhookTitle(evt)
+	subjectLabel := webhookServiceLabel(evt.Event)
 
 	switch webhookType {
 	case WebhookTypeSlack:
 		// Slack Incoming Webhook：用 attachments 才能带颜色与字段
-		fields := []map[string]any{{"title": "服务", "value": evt.Service, "short": true}}
+		fields := []map[string]any{{"title": subjectLabel, "value": evt.Service, "short": true}}
 		if evt.URL != "" {
 			fields = append(fields, map[string]any{"title": "地址", "value": evt.URL, "short": true})
 		}
@@ -163,7 +189,7 @@ func buildWebhookPayload(webhookType string, evt WebhookEvent) ([]byte, error) {
 
 	case WebhookTypeDiscord:
 		// Discord Webhook：embeds
-		fields := []map[string]any{{"name": "服务", "value": evt.Service, "inline": true}}
+		fields := []map[string]any{{"name": subjectLabel, "value": evt.Service, "inline": true}}
 		if evt.URL != "" {
 			fields = append(fields, map[string]any{"name": "地址", "value": evt.URL, "inline": true})
 		}
@@ -181,7 +207,7 @@ func buildWebhookPayload(webhookType string, evt WebhookEvent) ([]byte, error) {
 
 	case WebhookTypeTelegram:
 		// Telegram Bot API：token 直接写在 URL 里（https://api.telegram.org/bot<token>/sendMessage）
-		lines := []string{"*" + title + "*", evt.Message, "服务: " + evt.Service}
+		lines := []string{"*" + title + "*", evt.Message, subjectLabel + ": " + evt.Service}
 		if evt.URL != "" {
 			lines = append(lines, "地址: "+evt.URL)
 		}

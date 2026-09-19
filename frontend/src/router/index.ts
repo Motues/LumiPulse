@@ -22,6 +22,12 @@ const router = createRouter({
       component: () => import('../views/IncidentDetailPage.vue'),
     },
     {
+      // 邮件里的退订链接落地页：/unsubscribe?email=...&token=...
+      path: '/unsubscribe',
+      name: 'unsubscribe',
+      component: () => import('../views/UnsubscribePage.vue'),
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginPage.vue'),

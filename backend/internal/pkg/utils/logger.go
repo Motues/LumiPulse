@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	LevelInfo    = "info"
-	LevelWarn    = "warn"
-	LevelError   = "error"
-	LevelDebug   = "debug"
-	LevelFatal   = "fatal"
+	LevelInfo  = "info"
+	LevelWarn  = "warn"
+	LevelError = "error"
+	LevelDebug = "debug"
+	LevelFatal = "fatal"
 )
 
 var logger = log.New(os.Stdout, "", 0)

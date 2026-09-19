@@ -16,6 +16,9 @@ type Handler struct {
 
 	cache   cacheEntry
 	cacheMu sync.RWMutex
+
+	// apiKeyLimiter API 密钥的每分钟限流状态（进程内，见 middleware.go）
+	apiKeyLimiter apiKeyRateLimiter
 }
 
 type cacheEntry struct {

@@ -58,6 +58,8 @@ func (h *Handler) GetRobotsTxt(c *gin.Context) {
 	b.WriteString("Disallow: /admin\n")
 	b.WriteString("Disallow: /login\n")
 	b.WriteString("Disallow: /setup\n")
+	// 退订页带签名令牌，属于个人链接，不应被收录
+	b.WriteString("Disallow: /unsubscribe\n")
 	if base != "" {
 		b.WriteString("\nSitemap: " + base + "/sitemap.xml\n")
 	}

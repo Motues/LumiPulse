@@ -4,7 +4,9 @@ import { api } from '../api/client'
 import type { ServiceSummary, LatencyStats } from '../api/types'
 import ServiceMatrix from './ServiceMatrix.vue'
 import LatencyChart from './LatencyChart.vue'
+import LatencyHeatmap from './LatencyHeatmap.vue'
 import { useI18n } from '../composables/useI18n'
+import { certLevel, certRemainingDays } from '../utils/cert'
 
 const props = defineProps<{
   service: ServiceSummary
@@ -15,7 +17,7 @@ const emit = defineEmits<{
   back: []
 }>()
 
-const { t } = useI18n()
+const { t, formatDateTime } = useI18n()
 
 const latencies = ref<number[]>([])
 const statuses = ref<number[]>([])
@@ -40,6 +42,25 @@ const statusColors: Record<string, string> = {
 }
 
 const hasData = computed(() => statuses.value.some(s => s !== -1))
+
+/** HTTPS 证书到期信息：纯 HTTP 服务没有该字段，整块不展示 */
+const cert = computed(() => {
+  const iso = props.service.certExpiresAt
+  const level = certLevel(iso)
+  if (!iso || !level) return null
+  const days = certRemainingDays(iso)
+  return {
+    level,
+    expiresAt: formatDateTime(iso),
+    remaining: days !== null && days < 0 ? t('service.certExpired') : t('service.certRemaining', { n: Math.max(0, Math.floor(days ?? 0)) }),
+  }
+})
+
+const certColorClass: Record<string, string> = {
+  ok: '',
+  warn: 'text-[#f9ac05] dark:text-[#fbbf24]',
+  critical: 'text-[#df2d2a] dark:text-[#f87171]',
+}
 
 /** 图表概览：故障桶数量。延迟统计（平均 / P95 / P99 / 峰值）由后端在窗口内计算。 */
 const chartStats = computed(() => {
@@ -120,6 +141,13 @@ watch(() => props.service.publicHash, loadLatency)
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.probeInterval') }}</div>
           <div class="font-medium" style="color: var(--text-color);">{{ service.interval }}s</div>
         </div>
+        <div v-if="cert">
+          <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.certExpiry') }}</div>
+          <div class="font-medium" :class="certColorClass[cert.level]" :style="cert.level === 'ok' ? 'color: var(--text-color);' : ''">
+            {{ cert.expiresAt }}
+            <span class="text-xs opacity-60">· {{ cert.remaining }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -161,6 +189,11 @@ watch(() => props.service.publicHash, loadLatency)
         :interval-min="intervalMin"
         ring-color="var(--bg-color)"
       />
+    </div>
+
+    <!-- Response time heatmap -->
+    <div class="rounded-lg p-6 mb-6" style="border: 1px solid var(--button-border-color);">
+      <LatencyHeatmap :service-hash="service.publicHash" :days="7" />
     </div>
 
     <!-- Service history matrix -->

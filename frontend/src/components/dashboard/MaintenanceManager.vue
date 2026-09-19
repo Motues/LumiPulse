@@ -5,6 +5,10 @@ import type { Maintenance, Service } from '../../api/types'
 import { useToast } from '../../composables/useToast'
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
 import CustomSelect from './CustomSelect.vue'
+import DateTimePicker from './DateTimePicker.vue'
+import { useI18n } from '../../composables/useI18n'
+
+const { t, formatDateTime } = useI18n()
 
 const maintenances = ref<Maintenance[]>([])
 const loading = ref(true)
@@ -29,8 +33,8 @@ const { markClean: cleanMtn, handleClose: closeMtn, restoreFromStorage: restoreM
 // Timezone helpers: assume all times are CST (UTC+8)
 const CST_OFFSET = '+08:00'
 
-// datetime-local 输入框只接受 "YYYY-MM-DDTHH:mm" 形式（不允许带时区/秒），
-// 因此回填表单时必须把后端存储的 ISO 时间转换成 CST 墙上时间。
+// 表单里的时间统一用自研 DateTimePicker（值格式 "YYYY-MM-DDTHH:mm"），
+// 因此回填时必须把后端存储的 ISO 时间转换成 CST 墙上时间。
 function toDatetimeLocalValue(iso: string): string {
   if (!iso) return ''
   // 已经是不带时区的 datetime-local 形式，直接归一化（去掉秒/毫秒）
@@ -55,7 +59,7 @@ function toDatetimeLocalValue(iso: string): string {
 
 function toCSTISO(dt: string): string {
   if (!dt) return ''
-  // 统一先归一化成 datetime-local，再补上秒和 CST 偏移，避免重复拼接时区
+  // 统一先归一化成 "YYYY-MM-DDTHH:mm"，再补上秒和 CST 偏移，避免重复拼接时区
   const normalized = toDatetimeLocalValue(dt)
   if (!normalized) return ''
   return `${normalized}:00${CST_OFFSET}`
@@ -65,9 +69,8 @@ function formatCST(iso: string): string {
   if (!iso) return ''
   // If no timezone info in the string, assume CST
   const s = /[Z+-]/.test(iso) ? iso : iso + CST_OFFSET
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  if (Number.isNaN(new Date(s).getTime())) return iso
+  return formatDateTime(s)
 }
 
 // Service multi-select
@@ -114,38 +117,57 @@ const statusClass = (s: string) => {
   }
 }
 
-const statusLabel: Record<string, string> = {
-  scheduled: '计划中',
-  in_progress: '进行中',
-  completed: '已完成',
-  cancelled: '已取消',
-}
+const statusLabel = computed<Record<string, string>>(() => ({
+  scheduled: t('admin.maintenance.status.scheduled'),
+  in_progress: t('admin.maintenance.status.inProgress'),
+  completed: t('admin.maintenance.status.completed'),
+  cancelled: t('admin.maintenance.status.cancelled'),
+}))
+
+/** 维护状态下拉选项（随语言切换重新渲染） */
+const statusOptions = computed(() => [
+  { label: t('admin.maintenance.status.scheduled'), value: 'scheduled' },
+  { label: t('admin.maintenance.status.inProgress'), value: 'in_progress' },
+  { label: t('admin.maintenance.status.completed'), value: 'completed' },
+  { label: t('admin.maintenance.status.cancelled'), value: 'cancelled' },
+])
 
 // ---- 周期维护 ----
 
-const recurrenceOptions = [
-  { label: '不重复（一次性）', value: '' },
-  { label: '每天', value: 'daily' },
-  { label: '每周', value: 'weekly' },
-  { label: '每月', value: 'monthly' },
-]
+const recurrenceOptions = computed(() => [
+  { label: t('admin.maintenance.recurrence.none'), value: '' },
+  { label: t('admin.maintenance.recurrence.daily'), value: 'daily' },
+  { label: t('admin.maintenance.recurrence.weekly'), value: 'weekly' },
+  { label: t('admin.maintenance.recurrence.monthly'), value: 'monthly' },
+])
 
-const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const WEEKDAY_LABELS = computed(() => [
+  '',
+  t('admin.maintenance.weekday.mon'),
+  t('admin.maintenance.weekday.tue'),
+  t('admin.maintenance.weekday.wed'),
+  t('admin.maintenance.weekday.thu'),
+  t('admin.maintenance.weekday.fri'),
+  t('admin.maintenance.weekday.sat'),
+  t('admin.maintenance.weekday.sun'),
+])
 
 /** 把重复规则描述成一句话，列表里作为标签展示 */
 function recurrenceLabel(m: Maintenance): string {
   const interval = m.recurrenceInterval || 1
   switch (m.recurrence) {
     case 'daily':
-      return interval === 1 ? '每天' : `每 ${interval} 天`
+      return interval === 1 ? t('admin.maintenance.recurrence.daily') : t('admin.maintenance.recurrence.everyNDays', { n: interval })
     case 'weekly': {
       // 重复日期由开始时间的星期决定，这里直接由 scheduledStart 推导，避免回显不一致
       const weekday = weekdayOf(m.scheduledStart)
-      const day = weekday ? WEEKDAY_LABELS[weekday] : ''
-      return interval === 1 ? `每周${day}` : `每 ${interval} 周${day}`
+      const day = weekday ? WEEKDAY_LABELS.value[weekday] : ''
+      return interval === 1
+        ? t('admin.maintenance.recurrence.weeklyOn', { day })
+        : t('admin.maintenance.recurrence.everyNWeeksOn', { n: interval, day })
     }
     case 'monthly':
-      return interval === 1 ? '每月' : `每 ${interval} 个月`
+      return interval === 1 ? t('admin.maintenance.recurrence.monthly') : t('admin.maintenance.recurrence.everyNMonths', { n: interval })
     default:
       return ''
   }
@@ -163,7 +185,7 @@ function weekdayOf(iso: string): number {
 
 /** 重复截止日期的展示文案 */
 function recurrenceUntilLabel(m: Maintenance): string {
-  return m.recurrenceUntil ? `至 ${m.recurrenceUntil}` : ''
+  return m.recurrenceUntil ? t('admin.maintenance.recurrence.until', { date: m.recurrenceUntil }) : ''
 }
 
 async function load() {
@@ -172,7 +194,7 @@ async function load() {
     const res = await api.getAdminMaintenances()
     maintenances.value = res.data
   } catch (e: any) {
-    toast(e.message || '加载失败')
+    toast(e.message || t('admin.maintenance.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -255,21 +277,21 @@ async function save() {
     }
     showForm.value = false
     cleanMtn()
-    toast(editing.value ? '更新成功' : '创建成功', 'success')
+    toast(editing.value ? t('admin.maintenance.updateSuccess') : t('admin.maintenance.createSuccess'), 'success')
     load()
   } catch (e: any) {
-    toast(e.message || '保存失败')
+    toast(e.message || t('admin.maintenance.saveFailed'))
   }
 }
 
 async function remove(id: number) {
-  if (!confirm('确定要删除吗？')) return
+  if (!confirm(t('admin.maintenance.confirmDelete'))) return
   try {
     await api.deleteMaintenance(id)
-    toast('删除成功', 'success')
+    toast(t('admin.maintenance.deleteSuccess'), 'success')
     load()
   } catch (e: any) {
-    toast(e.message || '删除失败')
+    toast(e.message || t('admin.maintenance.deleteFailed'))
   }
 }
 
@@ -282,26 +304,26 @@ onMounted(() => {
 <template>
   <div>
     <div class="flex justify-between items-center mb-4">
-      <h2 class="text-lg font-bold" style="color: var(--text-color);">维护计划</h2>
+      <h2 class="text-lg font-bold" style="color: var(--text-color);">{{ t('admin.maintenance.listTitle') }}</h2>
       <button @click="openCreate" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-1 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
-        创建维护
+        {{ t('admin.maintenance.create') }}
       </button>
     </div>
 
-    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
 
     <div v-else class="rounded-xl" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
         <thead class="text-xs" style="color: var(--text-color); opacity: 0.4; background-color: var(--button-hover-color); opacity: 0.5; border-bottom: 1px solid var(--button-border-color);">
           <tr>
-            <th class="px-6 py-3 font-medium">标题</th>
-            <th class="px-6 py-3 font-medium">状态</th>
-            <th class="px-6 py-3 font-medium">开始时间</th>
-            <th class="px-6 py-3 font-medium">结束时间</th>
-            <th class="px-6 py-3 font-medium">受影响服务</th>
-            <th class="px-6 py-3 font-medium text-right">操作</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.maintenance.colTitle') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.maintenance.colStatus') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.maintenance.colStart') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.maintenance.colEnd') }}</th>
+            <th class="px-6 py-3 font-medium">{{ t('admin.maintenance.colAffectedServices') }}</th>
+            <th class="px-6 py-3 font-medium text-right">{{ t('admin.maintenance.colActions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y">
@@ -329,12 +351,12 @@ onMounted(() => {
             <td class="px-6 py-4 text-xs" style="color: var(--text-color); opacity: 0.5;">{{ formatCST(m.scheduledEnd) }}</td>
             <td class="px-6 py-4 text-xs max-w-40 truncate" style="color: var(--text-color); opacity: 0.5;">{{ affectedServiceNames(m.affectedServices) }}</td>
             <td class="px-6 py-4 text-right">
-              <button @click="openEdit(m)" class="op-btn op-btn-edit mr-3" title="编辑">
+              <button @click="openEdit(m)" class="op-btn op-btn-edit mr-3" :title="t('admin.maintenance.edit')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
               </button>
-              <button @click="remove(m.id)" class="op-btn op-btn-delete" title="删除">
+              <button @click="remove(m.id)" class="op-btn op-btn-delete" :title="t('admin.maintenance.delete')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
@@ -349,35 +371,35 @@ onMounted(() => {
     <!-- Form Modal -->
     <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseMtn">
       <div class="rounded-xl p-4 md:p-6 w-full max-w-lg mx-4" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
-        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ editing ? '编辑维护' : '创建维护' }}</h3>
+        <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ editing ? t('admin.maintenance.editMaintenance') : t('admin.maintenance.create') }}</h3>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">标题 *</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelTitle') }}</label>
             <input v-model="form.title" class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">描述</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelDescription') }}</label>
             <textarea v-model="form.description" rows="2" class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"></textarea>
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">开始时间 *</label>
-              <input v-model="form.scheduledStart" type="datetime-local" class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
+              <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelStart') }}</label>
+              <DateTimePicker v-model="form.scheduledStart" :placeholder="t('admin.maintenance.startPlaceholder')" />
             </div>
             <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">结束时间 *</label>
-              <input v-model="form.scheduledEnd" type="datetime-local" class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);" />
+              <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelEnd') }}</label>
+              <DateTimePicker v-model="form.scheduledEnd" :placeholder="t('admin.maintenance.endPlaceholder')" />
             </div>
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">状态</label>
-            <CustomSelect v-model="form.status" :options="[{ label: '计划中', value: 'scheduled' }, { label: '进行中', value: 'in_progress' }, { label: '已完成', value: 'completed' }, { label: '已取消', value: 'cancelled' }]" />
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelStatus') }}</label>
+            <CustomSelect v-model="form.status" :options="statusOptions" />
           </div>
 
           <!-- 周期重复：窗口结束后由服务端推进到下一个窗口 -->
           <div class="rounded-lg p-3 space-y-3" style="border: 1px solid var(--button-border-color);">
             <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">重复</label>
+              <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelRecurrence') }}</label>
               <CustomSelect v-model="form.recurrence" :options="recurrenceOptions" />
             </div>
 
@@ -385,7 +407,7 @@ onMounted(() => {
               <div class="grid grid-cols-2 gap-4">
                 <div>
                   <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">
-                    {{ form.recurrence === 'daily' ? '每隔几天' : form.recurrence === 'weekly' ? '每隔几周' : '每隔几个月' }}
+                    {{ form.recurrence === 'daily' ? t('admin.maintenance.intervalDays') : form.recurrence === 'weekly' ? t('admin.maintenance.intervalWeeks') : t('admin.maintenance.intervalMonths') }}
                   </label>
                   <input
                     v-model.number="form.recurrenceInterval"
@@ -397,23 +419,18 @@ onMounted(() => {
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">重复截止</label>
-                  <input
-                    v-model="form.recurrenceUntil"
-                    type="date"
-                    class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                    style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
-                  />
+                  <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelRecurrenceUntil') }}</label>
+                  <DateTimePicker v-model="form.recurrenceUntil" mode="date" :placeholder="t('admin.maintenance.recurrenceUntilPlaceholder')" />
                 </div>
               </div>
               <div v-if="form.recurrence === 'monthly'">
-                <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">每月第几天</label>
+                <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelMonthday') }}</label>
                 <input
                   v-model.number="form.recurrenceMonthday"
                   type="number"
                   min="0"
                   max="31"
-                  placeholder="留空则按开始日期"
+                  :placeholder="t('admin.maintenance.monthdayPlaceholder')"
                   class="w-full px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   style="border: 1px solid var(--button-border-color); background-color: var(--bg-color); color: var(--text-color);"
                 />
@@ -421,15 +438,15 @@ onMounted(() => {
               <p class="text-xs" style="color: var(--text-color); opacity: 0.45;">
                 {{
                   form.recurrence === 'weekly'
-                    ? '重复日期由开始时间的星期决定（例如开始时间选在周日 02:00，则每周日 02:00 重复）。'
-                    : '窗口结束后服务端会自动把开始/结束时间推进到下一个窗口，状态回到「计划中」。'
+                    ? t('admin.maintenance.hintWeekly')
+                    : t('admin.maintenance.hintAdvance')
                 }}
-                重复截止留空表示一直重复。
+                {{ t('admin.maintenance.hintUntilEmpty') }}
               </p>
             </template>
           </div>
           <div class="relative">
-            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">受影响服务</label>
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.maintenance.labelAffectedServices') }}</label>
             <div
               class="w-full px-3 py-2 rounded-lg text-sm cursor-text focus-within:border-emerald-500 min-h-[38px] flex flex-wrap gap-1"
               style="border: 1px solid var(--button-border-color); background-color: var(--bg-color);"
@@ -446,7 +463,7 @@ onMounted(() => {
                 @focus="showServiceDropdown = true"
                 @blur="delayBlur"
                 type="text"
-                placeholder="搜索服务..."
+                :placeholder="t('admin.maintenance.searchServicePlaceholder')"
                 class="border-0 outline-none text-sm flex-1 min-w-[80px] bg-transparent dark:placeholder-gray-500"
                 style="color: var(--text-color);"
               />
@@ -466,14 +483,14 @@ onMounted(() => {
                 <span v-if="selectedServices.includes(svc.id)" class="text-emerald-500">&#10003;</span>
               </div>
               <div v-if="filteredServices.length === 0" class="px-3 py-2 text-sm" style="color: var(--text-color); opacity: 0.4;">
-                无匹配服务
+                {{ t('admin.maintenance.noMatchingService') }}
               </div>
             </div>
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6">
-          <button @click="handleCloseMtn" class="btn-cancel px-4 py-2 text-sm rounded-lg">取消</button>
-          <button @click="save" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">保存</button>
+          <button @click="handleCloseMtn" class="btn-cancel px-4 py-2 text-sm rounded-lg">{{ t('admin.maintenance.cancel') }}</button>
+          <button @click="save" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">{{ t('admin.maintenance.save') }}</button>
         </div>
       </div>
     </div>

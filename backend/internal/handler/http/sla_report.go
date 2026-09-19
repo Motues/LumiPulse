@@ -11,16 +11,23 @@ import (
 	"lumipluse-backend/internal/pkg/utils"
 )
 
-// SLAMonthlyEmailData 月报邮件的渲染数据。
+// SLAMonthlyEmailData 月报/周报邮件的渲染数据。
 // 把聚合结果先拍平成模板友好的结构，模板里就不用再做条件判断。
 type SLAMonthlyEmailData struct {
 	Lang       i18n.Lang
 	Month      string
 	MonthLabel string
-	Intro      string
-	FooterNote string
-	SiteName   string
-	Final      bool
+	// Title 报告标题：月报为「月度 SLA 报告」，周报为「周报摘要」
+	Title string
+	// PeriodShort 平均响应卡片下方的小字（月报=月份，周报=日期区间简写）
+	PeriodShort string
+	Intro       string
+	FooterNote  string
+	SiteName    string
+	Final       bool
+	// CompareText / CompareColor 与上一周期的环比文案（周报使用；为空则不渲染该行）
+	CompareText  string
+	CompareColor string
 
 	OverallUptime  string
 	TotalProbes    int
@@ -46,20 +53,23 @@ type SLAMonthlyEmailService struct {
 	CoveredDays  string
 }
 
-// buildSLAMonthlyEmail 依据月报生成邮件主题与 HTML 正文。
-func buildSLAMonthlyEmail(report *model.MonthlySLAReport, lang i18n.Lang) (subject, body string) {
+// emailSiteName 邮件抬头用的站点名（未配置时退回 LumiPulse）
+func emailSiteName() string {
 	siteName := strings.TrimSpace(utils.GetSetting("site_name"))
 	if siteName == "" {
 		siteName = "LumiPulse"
 	}
+	return siteName
+}
 
+// newSLAEmailData 把报告里的数字拍平成渲染数据。
+// 月报与周报共用这一段，保证两份邮件的统计口径与表格结构完全一致。
+func newSLAEmailData(report *model.MonthlySLAReport, lang i18n.Lang) SLAMonthlyEmailData {
 	data := SLAMonthlyEmailData{
 		Lang:       lang,
 		Month:      report.Month,
-		MonthLabel: lang.MonthLabel(report.Month),
-		Intro:      lang.SLAIntro(report.Month),
 		FooterNote: lang.SLAFooterNote(),
-		SiteName:   siteName,
+		SiteName:   emailSiteName(),
 		Final:      report.Final,
 	}
 
@@ -97,15 +107,51 @@ func buildSLAMonthlyEmail(report *model.MonthlySLAReport, lang i18n.Lang) (subje
 		data.Services = append(data.Services, row)
 	}
 
-	return slaEmailSubject(siteName, data), renderSLAMonthlyEmail(data)
+	return data
+}
+
+// buildSLAMonthlyEmail 依据月报生成邮件主题与 HTML 正文。
+func buildSLAMonthlyEmail(report *model.MonthlySLAReport, lang i18n.Lang) (subject, body string) {
+	data := newSLAEmailData(report, lang)
+	data.Title = lang.SLATitle()
+	data.MonthLabel = lang.MonthLabel(report.Month)
+	data.PeriodShort = data.MonthLabel
+	data.Intro = lang.SLAIntro(report.Month)
+
+	return slaEmailSubject(data.SiteName, data), renderSLAMonthlyEmail(data)
+}
+
+// buildWeeklyEmail 依据周报（含上一周期报告，用于环比）生成邮件主题与正文。
+// from / to 为统计区间的首尾两天（YYYY-MM-DD）。
+func buildWeeklyEmail(report, previous *model.MonthlySLAReport, lang i18n.Lang, from, to string) (subject, body string) {
+	data := newSLAEmailData(report, lang)
+	data.Title = lang.WeeklyTitle()
+	data.MonthLabel = lang.DateRangeLabel(from, to)
+	data.PeriodShort = lang.ShortDateRange(from, to)
+	data.Intro = lang.WeeklyIntro(from, to)
+
+	// 环比上周：只在两边都有数据时展示，否则「+100%」之类的噪声没有意义
+	if previous != nil && previous.Summary.TotalProbes > 0 && data.HasData {
+		uptimeDelta := report.Summary.Uptime - previous.Summary.Uptime
+		incidentDelta := report.Summary.Incidents - previous.Summary.Incidents
+		data.CompareText = fmt.Sprintf("%s %+.3f%%, %s %+d",
+			lang.SLAOverallUptime(), uptimeDelta, lang.SLAIncidents(), incidentDelta)
+		if uptimeDelta >= 0 {
+			data.CompareColor = "#34a761"
+		} else {
+			data.CompareColor = "#df2d2a"
+		}
+	}
+
+	return slaEmailSubject(data.SiteName, data), renderSLAMonthlyEmail(data)
 }
 
 // slaEmailSubject 邮件主题，中英文的括号习惯不同
 func slaEmailSubject(siteName string, d SLAMonthlyEmailData) string {
 	if d.Lang == i18n.ZH {
-		return fmt.Sprintf("%s - %s（%s）", siteName, d.Lang.SLATitle(), d.MonthLabel)
+		return fmt.Sprintf("%s - %s（%s）", siteName, d.Title, d.MonthLabel)
 	}
-	return fmt.Sprintf("%s - %s (%s)", siteName, d.Lang.SLATitle(), d.MonthLabel)
+	return fmt.Sprintf("%s - %s (%s)", siteName, d.Title, d.MonthLabel)
 }
 
 // uptimeColor 可用率对应的强调色，与前端阈值保持一致
@@ -149,7 +195,7 @@ func renderSLAMonthlyEmail(d SLAMonthlyEmailData) string {
       <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)">
         <tr><td style="padding:32px 32px 0">
           <div style="font-size:20px;font-weight:700;color:#1a1a2e">` + d.SiteName + `</div>
-          <div style="font-size:13px;color:#999;margin-top:4px">` + d.MonthLabel + ` &middot; ` + d.Lang.SLATitle() + `</div>
+          <div style="font-size:13px;color:#999;margin-top:4px">` + d.MonthLabel + ` &middot; ` + d.Title + `</div>
         </td></tr>
         <tr><td style="padding:16px 32px 0;font-size:14px;line-height:1.7;color:#555">` + d.Intro + `</td></tr>
         <tr><td style="padding:16px 32px 24px">
@@ -164,7 +210,7 @@ func renderSLAMonthlyEmail(d SLAMonthlyEmailData) string {
 		{d.Lang.SLAOverallUptime(), d.OverallUptime, fmt.Sprintf("%s %d", d.Lang.SLAProbes(), d.TotalProbes)},
 		{d.Lang.SLAIncidents(), fmt.Sprintf("%d", d.Incidents), fmt.Sprintf("%s %d", d.Lang.SLAFailedProbes(), d.DowntimeProbes)},
 		{d.Lang.SLADowntime(), d.DowntimeText, ""},
-		{d.Lang.SLAAvgLatency(), d.AvgLatency, d.MonthLabel},
+		{d.Lang.SLAAvgLatency(), d.AvgLatency, d.PeriodShort},
 	}
 	for _, c := range cards {
 		body.WriteString(`<td width="25%" style="padding:12px;background:#fafafa;border-radius:8px;vertical-align:top">`)
@@ -177,7 +223,15 @@ func renderSLAMonthlyEmail(d SLAMonthlyEmailData) string {
 	}
 
 	body.WriteString(`</tr></table>
-        </td></tr>
+        </td></tr>`)
+
+	// 环比上一周期（周报使用；月报为空时不渲染这一行）
+	if d.CompareText != "" {
+		body.WriteString(`<tr><td style="padding:0 32px 16px;font-size:12px;color:#999">` + d.Lang.SLACompareLabel() +
+			`<span style="font-weight:600;color:` + d.CompareColor + `">` + d.CompareText + `</span></td></tr>`)
+	}
+
+	body.WriteString(`
         <tr><td style="padding:0 32px 8px">
           <div style="font-size:14px;font-weight:600;color:#1a1a2e;margin-bottom:8px">` + d.Lang.SLAServiceTitle() + `</div>
         </td></tr>

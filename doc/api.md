@@ -53,6 +53,11 @@
   影响 `/feed/*` 的标题与字段名、告警邮件、月度 SLA 报告邮件，以及检查器
   自动创建的事件标题与进展文案。前端界面语言由浏览器决定（可在页脚手动切换），
   与 `LANG` 相互独立。
+- **管理接口的两种凭据权限不同**：会话 Token（`/admin/login` 获得）代表管理员本人，
+  不受限制；API 密钥受 `scope`（`read` / `write`）限制，且**高危操作一律不可用**
+  （删除服务 `DELETE /admin/services/:id`、导入覆盖 `POST /admin/import`、
+  改管理员账号 `PUT /admin/profile`，用密钥调用返回 403）。
+  详见「API 密钥管理」一节。
 
 ---
 
@@ -66,7 +71,7 @@
 GET /api/v1/health
 ```
 
-用于负载均衡和容器编排探针。
+用于负载均衡和容器编排探针。只表示进程存活（liveness），不检查数据库。
 
 **响应**
 
@@ -80,6 +85,68 @@ GET /api/v1/health
   }
 }
 ```
+
+---
+
+### 就绪检查
+
+```
+GET /api/v1/ready
+```
+
+readiness 探针：会真正检查数据库连通性。数据库不可用时返回 **503**，
+编排系统应据此停止向该实例导流。
+
+**响应** (200)
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "status": "ready",
+    "version": "0.1.4"
+  }
+}
+```
+
+**响应** (503)
+
+```json
+{
+  "code": 503,
+  "message": "database unavailable",
+  "data": {
+    "status": "unavailable"
+  }
+}
+```
+
+---
+
+### 状态徽章
+
+```
+GET /badge/:hash.svg
+```
+
+返回 shields.io 风格的 SVG 状态徽章，**无需鉴权**，可直接嵌入 README / 文档站：
+
+```markdown
+![status](https://status.example.com/badge/<publicHash>.svg)
+```
+
+| 服务状态 | 徽章配色 |
+| --- | --- |
+| `operational` | 绿色 `#34a761` |
+| `degraded` | 橙色 `#fda305` |
+| `outage` | 红色 `#df2d2a` |
+
+状态判定与公开状态页一致：活跃事件（`investigating` / `identified`）会覆盖
+服务自身的 `status`。`hash` 不存在时返回 404。
+
+**Content-Type**: `image/svg+xml; charset=utf-8`
+**Cache-Control**: `public, max-age=60`
 
 ---
 
@@ -112,6 +179,59 @@ POST /api/v1/subscribe
 ```
 
 邮箱已订阅时返回 200，message 为 `"该邮箱已订阅"`（同时更新订阅的服务列表）。
+
+**投递行为**：订阅立即生效（不做双重确认，`verified` 直接为 1）。服务发生异常 / 恢复时，
+除发给 `notify_emails` 外，也会**按订阅的服务列表**发给订阅者：`services` 留空的订阅者
+会收到全部服务的通知（含将来新增的服务）。每封订阅者邮件底部都带退订 / 偏好管理链接。
+
+---
+
+### 订阅自助管理（退订 / 修改偏好）
+
+```
+GET    /api/v1/subscription?email=...&token=...
+PUT    /api/v1/subscription
+DELETE /api/v1/subscription?email=...&token=...
+```
+
+邮件底部的退订链接指向前端页面 `/unsubscribe?email=...&token=...`，页面通过这三个公开接口
+读取偏好、保存偏好或退订。**无需鉴权**，安全性由签名令牌保证：
+
+- 令牌 = `HMAC-SHA256(unsubscribe_secret, 小写邮箱)`，`unsubscribe_secret` 首次使用时自动生成并存库；
+- 令牌与邮箱绑定，因此拿到别人的链接也无法退订他人邮箱（跨邮箱使用返回 403）；
+- 校验失败统一返回 403，不区分「邮箱不存在」与「签名错误」，避免被用来探测订阅关系。
+
+**查询 / 更新参数**
+
+| 参数 | 位置 | 说明 |
+| --- | --- | --- |
+| `email` | query（GET/DELETE）/ body（PUT） | 订阅邮箱 |
+| `token` | query（GET/DELETE）/ body（PUT） | 退订令牌 |
+| `services` | body（PUT） | 订阅的服务 ID 数组；**空数组表示订阅全部服务** |
+
+**响应** (200)
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "email": "user@example.com",
+    "services": [1, 2],
+    "siteName": "LumiPulse"
+  }
+}
+```
+
+| 状态码 | 说明 |
+| --- | --- |
+| 400 | 缺少 `email` |
+| 403 | 令牌缺失或校验失败 |
+| 404 | 该邮箱没有订阅记录（已退订或从未订阅） |
+| 500 | 保存 / 删除失败 |
+
+> **邮件里的绝对链接**：退订链接使用设置项 `site_url`（例如 `https://status.example.com`）；
+> 未配置时退回 `allow_origin` 的第一个来源；两者都为空时邮件不附带退订区块（不会给出打不开的链接）。
 
 ---
 
@@ -216,10 +336,34 @@ GET /api/v1/summary
       {
         "id": 1,
         "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
+        "folderId": 2,
         "name": "API 服务",
         "status": "operational",
         "url": "https://api.example.com",
-        "uptime": 99.49
+        "uptime": 99.49,
+        "certExpiresAt": "2026-12-01T00:00:00Z"
+      }
+    ],
+    "folders": [
+      {
+        "id": 2,
+        "name": "核心集群",
+        "description": "网关与认证服务",
+        "status": "degraded",
+        "uptime": 99.12,
+        "latency": 86,
+        "services": [
+          {
+            "id": 1,
+            "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
+            "folderId": 2,
+            "name": "API 服务",
+            "status": "operational",
+            "url": "https://api.example.com",
+            "uptime": 99.49,
+            "latency": 42
+          }
+        ]
       }
     ],
     "activeIncidents": [
@@ -260,6 +404,28 @@ GET /api/v1/summary
 ```
 
 `overallStatus` 取值：`operational`（正常）、`degraded`（部分故障）、`outage`（严重故障）
+
+> 服务项里的 `certExpiresAt` 仅 HTTPS 服务有值（对端证书到期时间，RFC3339）；
+> 纯 HTTP 服务与尚未探测成功时该字段省略，可直接用于展示证书剩余天数。
+
+**服务分组（服务聚合文件夹）**
+
+`folders` 把同一分组下的服务融合成一个条目，前端可以用它替代这些服务的独立展示，
+展开后再从 `folders[].services`（结构与 `services` 完全一致）读取各服务明细。
+
+| 字段 | 说明 |
+| --- | --- |
+| `status` | 聚合状态：分组内**全部** `operational` → `operational`，**全部** `outage` → `outage`，其余 → `degraded` |
+| `uptime` | 融合可用率，**按探测次数加权**（用每日汇总的 up/down 计数），不是各服务可用率的简单平均 |
+| `latency` | 融合响应时间（ms），只统计成功样本并同样按次数加权 |
+| `services` | 分组内服务的完整明细 |
+
+可见性规则：
+
+- 分组有独立的 `showOnHomepage` 开关。**分组可见时，其下服务即便自身 `showOnHomepage=false`
+  也会随分组展示**（聚合条目需要完整明细）；分组不可见时，其下服务完全不出现在公开接口。
+- `services` 里属于可见分组的服务仍会返回（带 `folderId`），未分组的服务保持原有位置与顺序。
+- 没有任何可见分组时 `folders` 省略。
 
 ---
 
@@ -333,6 +499,7 @@ GET /api/v1/services/:hash/history?days=90
       "status": "operational",
       "isActive": true,
       "sortOrder": 0,
+      "certExpiresAt": "2026-12-01T00:00:00Z",
       "createdAt": "2026-01-01T00:00:00Z",
       "updatedAt": "2026-05-09T00:00:00Z"
     },
@@ -413,6 +580,57 @@ GET /api/v1/services/:hash/latency?days=1
 > `stats` 只统计成功样本：失败请求的耗时往往是超时上限，混进分位数会把 p95/p99
 > 直接顶到超时值，反而看不出正常请求的长尾。分位数在 SQLite 内用窗口函数一次算出，
 > 不会把窗口内的原始心跳搬到 Go 里排序。
+
+---
+
+### 获取响应时间热力图
+
+```
+GET /api/v1/services/:hash/latency-heatmap?days=7
+```
+
+按「日期 × 小时」（北京时间）聚合平均响应时间，用于服务详情页的热力图。
+聚合在 SQLite 内用 `GROUP BY` 完成：7 天原始数据是 2016 个 5 分钟桶，
+只下发聚合后的格子（最多 `days × 24` 个）。
+
+**查询参数**
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `days` | int | 7 | 统计天数（含当天），上限为 `HEARTBEAT_RETENTION_DAYS` |
+
+窗口为 `[今天 - (days-1), 今天]`（北京时间，含首尾）。
+
+**响应**
+
+```json
+{
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "from": "2026-09-13",
+    "to": "2026-09-19",
+    "days": 7,
+    "maxAvg": 300,
+    "cells": [
+      { "day": "2026-09-19", "hour": 10, "avg": 200, "samples": 2, "failures": 1 },
+      { "day": "2026-09-18", "hour": 23, "avg": 300, "samples": 1, "failures": 0 }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `from` / `to` | string | 窗口首尾日期（`YYYY-MM-DD`，北京时间） |
+| `maxAvg` | int | 所有格子的最大平均延迟，前端据此确定色阶上限 |
+| `cells` | array | **只含有数据的小时**（稀疏），前端按 `from`~`to` 补齐空格子 |
+| `cells[].avg` | int | 该小时内**成功样本**的平均延迟（毫秒） |
+| `cells[].samples` | int | 成功样本数；为 `0` 且 `failures > 0` 表示该小时全部失败 |
+| `cells[].failures` | int | 该小时内的失败探测次数 |
+
+> 成功 / 失败判定与延迟分桶、分位数接口完全一致（成功 = `200 ≤ status < 400` 或 TCP `status = 1`）。
+> 失败探测的耗时不计入 `avg`。
 
 ---
 
@@ -602,10 +820,20 @@ GET /api/v1/incidents/:hash
     "resolvedAt": "2026-05-08T18:45:00Z",
     "createdAt": "2026-05-08T18:00:00Z",
     "updatedAt": "2026-05-08T18:45:00Z",
+    "rootCause": "数据库连接池被慢查询耗尽",
+    "resolution": "扩容连接池并给慢查询补上索引",
+    "postmortemUrl": "https://example.com/postmortems/2026-05-08",
+    "postmortemPublic": true,
     "updates": []
   }
 }
 ```
+
+> **事后复盘（Postmortem）**：`rootCause` / `resolution` / `postmortemUrl` 三个字段仅在
+> 该事件勾选了「对外公开复盘」（`postmortemPublic: true`）时才会返回；未勾选时后端会
+> 把这三个字段清空（本接口、`/incidents` 列表、`/summary` 的活跃事件都一致处理），
+> 因此内部根因描述不会因为接口疏漏外泄。前端只需判断这三个字段是否存在即可决定是否渲染。
+> `postmortemPublic` 本身总会返回，便于前端展示「仅内部可见」的提示。
 
 `hash` 不存在时返回 `404`。
 
@@ -899,7 +1127,7 @@ GET /api/v1/admin/logs?page=1&limit=50&serviceId=0&status=all
 | `page` | int | 1 | 页码 |
 | `limit` | int | 50 | 每页数量（最大 200） |
 | `serviceId` | int | 0 | 按服务筛选（0=全部） |
-| `status` | string | "all" | 筛选：`all`、`success`、`failure` |
+| `status` | string | "all" | 筛选：`all`、`success`、`failure`。`success`/`failure` 按各服务自己的判定口径过滤（期望状态码 + 期望关键字），与服务探测时的结论一致 |
 
 **响应**
 
@@ -915,7 +1143,8 @@ GET /api/v1/admin/logs?page=1&limit=50&serviceId=0&status=all
         "serviceName": "API 服务",
         "status": 200,
         "latency": 120,
-        "message": "OK",
+        "message": "HTTP 200",
+        "isSuccess": true,
         "createdAt": "2026-05-09T00:00:00Z"
       }
     ],
@@ -927,6 +1156,10 @@ GET /api/v1/admin/logs?page=1&limit=50&serviceId=0&status=all
   }
 }
 ```
+
+> `isSuccess` 由后端按服务的期望状态码与期望关键字给出，前端直接使用即可。
+> `message` 会带上状态码与截断后的响应体片段（最多 200 字符），失败时额外说明原因
+> （不在期望状态码范围内 / 响应内容未包含期望关键字），便于排查关键字不匹配的问题。
 
 ---
 
@@ -950,6 +1183,7 @@ GET /api/v1/admin/settings
     "admin_email": "",
     "admin_name": "admin",
     "allow_origin": "http://localhost:5173",
+    "site_url": "https://status.example.com",
     "smtp_host": "",
     "smtp_port": "",
     "smtp_user": "",
@@ -957,6 +1191,12 @@ GET /api/v1/admin/settings
     "email_enabled": "true",
     "notify_services": "",
     "notify_emails": "",
+    "alert_cooldown_minutes": "",
+    "quiet_hours_start": "",
+    "quiet_hours_end": "",
+    "alert_escalation_enabled": "false",
+    "alert_escalation_minutes": "15",
+    "alert_escalation_repeat_minutes": "",
     "webhook_enabled": "false",
     "webhook_type": "generic",
     "webhook_url": "",
@@ -966,7 +1206,11 @@ GET /api/v1/admin/settings
     "sla_report_enabled": "false",
     "sla_report_emails": "",
     "sla_report_language": "",
+    "weekly_report_enabled": "false",
+    "weekly_report_emails": "",
+    "weekly_report_weekday": "1",
     "last_sla_report_month": "",
+    "weekly_report_last_sent": "",
     "show_admin_footer_button": "true",
     "custom_footer": "",
     "sub_enable_email": "true",
@@ -991,6 +1235,99 @@ PUT /api/v1/admin/settings
   "allow_origin": "http://localhost:5173,https://status.example.com"
 }
 ```
+
+只接受白名单内的键，出现未知键会整请求返回 400（`Setting "xxx" is not allowed`）。
+`admin_password` / `smtp_pass` / `webhook_secret` 属敏感项：读取时返回空字符串，
+提交时空值表示「保持原值不变」。`last_sla_report_month` 与 `weekly_report_last_sent`
+是服务端自己维护的去重标记，可读但会被写入请求忽略。
+
+#### 报告邮件（月报 / 周报）
+
+在「通知管理 → 月度 SLA 报告邮件 / 周报摘要邮件」中配置：
+
+| 设置项 | 说明 |
+| --- | --- |
+| `sla_report_enabled` | 是否发送月度 SLA 报告 |
+| `sla_report_emails` | 月报收件邮箱（逗号分隔）；留空则复用 `notify_emails` |
+| `sla_report_language` | 报告语言：`zh-CN` / `en-US`，留空跟随服务端 `LANG`。**月报与周报共用** |
+| `weekly_report_enabled` | 是否发送周报摘要 |
+| `weekly_report_emails` | 周报收件邮箱（逗号分隔）；留空则复用 `notify_emails` |
+| `weekly_report_weekday` | 周报发送日：`1`=周一 … `7`=周日，默认 `1` |
+
+触发与统计口径：
+
+- 月报在检测到「进入新月份」时发送上一个自然月的报告；周报在配置的星期几发送，
+  统计窗口固定为**发送日往前 7 天**（即截止到昨天，不含发送当天）。
+- 两者都由检查器的每日任务驱动，并各自记录去重标记（`last_sla_report_month` /
+  `weekly_report_last_sent`），**同一天内重启进程不会重复发送**；发送失败不记录标记，
+  下个周期会重试。
+- 收件人为空、窗口内没有任何探测数据时直接跳过（日志中会看到跳过原因）。
+- 周报与月报共用同一套版式与统计口径（可用率按探测次数加权），周报额外附带
+  「较上周：可用率 ±x.xxx%，事件 ±n」的环比行；上一周期无数据时不展示环比。
+
+#### 通知模板
+
+在「通知管理 → 通知模板」中配置。四类通知各自可自定义**主题**与**正文**，留空则使用内置的
+中/英文案（跟随 `LANG`）。**邮件与 webhook 共用同一份渲染结果**（webhook 取正文作为 `message`）。
+
+| 设置项 | 说明 |
+| --- | --- |
+| `tpl_alert_subject` / `tpl_alert_body` | 服务异常通知 |
+| `tpl_resolved_subject` / `tpl_resolved_body` | 服务恢复通知 |
+| `tpl_maintenance_subject` / `tpl_maintenance_body` | 维护计划即将开始提醒 |
+| `tpl_cert_subject` / `tpl_cert_body` | HTTPS 证书即将到期提醒 |
+
+变量写成 `{{name}}`（两侧空格可有可无）：
+
+| 通知类型 | 可用变量 |
+| --- | --- |
+| 异常 | `{{service}}` `{{url}}` `{{time}}` `{{site}}` |
+| 恢复 | `{{service}}` `{{url}}` `{{duration}}` `{{time}}` `{{site}}` |
+| 维护提醒 | `{{title}}` `{{start}}` `{{countdown}}` `{{site}}` |
+| 证书到期 | `{{service}}` `{{expires}}` `{{remaining}}` `{{site}}` |
+
+渲染规则：
+
+- 模板按**纯文本**处理，不能写 HTML：写入邮件时会先做 HTML 转义，再把换行转成 `<br>`，
+  因此变量值（服务名、URL 等）不会破坏邮件结构，也不存在注入问题。
+- 已知变量按其值替换（值为空即替换为空）；**未知变量原样保留**，便于发现拼写错误。
+- 恢复通知中 `{{duration}}` 在无可用时长时为空字符串。
+
+#### 告警静默与免打扰
+
+在「通知管理 → 告警静默与免打扰」中配置：
+
+| 设置项 | 说明 |
+| --- | --- |
+| `alert_cooldown_minutes` | 同一服务的告警冷却窗口（分钟，1~1440）。窗口内重复产生的异常事件仍会创建，但**只通知一次**；留空或 `0` 表示不限制 |
+| `quiet_hours_start` / `quiet_hours_end` | 免打扰时段（`HH:mm`，北京时间）。两者都填写才生效，`start > end` 表示跨零点（如 `23:00` - `07:00`）；起止相同视为不启用 |
+
+行为约定：
+
+- 免打扰时段内**不发告警邮件**（异常与恢复都不发），**webhook 照常投递**——夜间仍能通过群机器人/手机收到，只是不往邮箱堆。
+- `critical` 级别（事件 `impact`）的异常**穿透免打扰**，无论何时都发邮件。自动创建的事件目前固定为 `major`。
+- 冷却窗口只作用于「异常」通知；恢复通知始终发送，避免出现「恢复了却没人知道」。
+- 维护计划提前提醒与证书到期提醒属于一次性通知，**不受免打扰影响**（否则会被丢掉且不再补发）。
+- 维护窗口内的服务不会自动创建事件（检查器在 `trackProbeState` 里已跳过），因此也不会产生告警。
+
+#### 告警升级
+
+在「通知管理 → 告警升级」中配置。事件创建后如果一直没人确认，超过时限会再次通知，
+避免告警被忽略；在「事件管理」里点击事件行的「未确认」即可确认（见下方 `acknowledged` 字段）。
+
+| 设置项 | 说明 |
+| --- | --- |
+| `alert_escalation_enabled` | 是否启用告警升级（默认 `false`）。关闭时完全不扫描，不会产生任何升级通知 |
+| `alert_escalation_minutes` | 升级时限（分钟，1~10080，默认 15）。事件创建后超过该时长仍未确认则升级通知 |
+| `alert_escalation_repeat_minutes` | 重复升级间隔（分钟，0~10080）。留空或 `0` 表示**只升级一次**；填写后会在事件仍未确认时按该间隔反复提醒 |
+
+行为约定：
+
+- 只扫描**未解决且未确认**的顶层事件（`parent_id IS NULL`）；合并事件的子事件不单独升级。
+- 升级通知走邮件 + webhook + 订阅者，文案模板为 `tpl_escalation_subject` / `tpl_escalation_body`。
+- 升级邮件同样受免打扰时段影响，`critical` 级别事件穿透；webhook 不受影响。
+- 每次升级会把 `escalationCount + 1` 并记录 `lastEscalatedAt`，因此**重启服务不会补发历史升级**。
+- 取消确认会重置 `escalationCount` 与 `lastEscalatedAt`，让事件重新走一遍未确认 → 升级的流程。
 
 ---
 
@@ -1100,8 +1437,11 @@ POST /api/v1/admin/test-webhook
 | `webhook_type` | 渠道：`generic`（默认）/ `slack` / `discord` / `telegram` |
 | `webhook_url` | 接收地址。Telegram 为 `https://api.telegram.org/bot<token>/sendMessage` |
 | `webhook_secret` | 仅 `generic`：启用 HMAC-SHA256 签名 |
-| `webhook_events` | 订阅的事件，逗号分隔：`down`（异常）/ `up`（恢复）。留空视为都订阅 |
+| `webhook_events` | 订阅的事件，逗号分隔：`down`（异常）/ `up`（恢复，正文带本次不可用时长）/ `maintenance`（维护计划即将开始提醒，见 `MAINTENANCE_REMIND_MINUTES`）/ `cert_expiring`（HTTPS 证书剩余 < 30 天、< 7 天）。留空视为都订阅 |
 | `webhook_telegram_chat_id` | 仅 `telegram`：目标会话 ID |
+
+> `webhook_secret` 与 `smtp_pass` 属于敏感项：`GET /admin/settings` 只返回空字符串，
+> `PUT` 时传空值表示「保持原值不变」，不会被清空。
 
 **请求体形状**
 
@@ -1186,9 +1526,15 @@ POST /api/v1/admin/services
   "url": "https://api.example.com/health",
   "type": "http",
   "interval": 60,
+  "timeoutSeconds": 10,
   "sortOrder": 0,
   "showOnHomepage": true,
-  "insecureSkipVerify": false
+  "insecureSkipVerify": false,
+  "httpMethod": "POST",
+  "httpHeaders": "{\"Authorization\":\"Bearer xxx\",\"Accept\":\"application/json\"}",
+  "httpBody": "{\"probe\":true}",
+  "expectStatus": "200-299",
+  "expectKeyword": "\"status\":\"ok\""
 }
 ```
 
@@ -1197,8 +1543,29 @@ POST /api/v1/admin/services
 | 字段 | 说明 |
 | --- | --- |
 | `interval` | 探测间隔（秒），取值范围 **10 ~ 3600**，默认 60。检查器按该值调度，不再是固定 1 分钟 |
+| `timeoutSeconds` | 单次探测超时（秒），取值范围 **1 ~ 300**，默认 10（传 `0` 或省略即用默认值）。慢接口调大，避免被误判为故障 |
 | `showOnHomepage` | 是否在公开状态页展示 |
 | `insecureSkipVerify` | 仅对该服务跳过 HTTPS 证书校验（默认 `false`），用于自签证书的内网服务。优先使用它，而不是全局的 `INSECURE_SKIP_VERIFY` |
+| `httpMethod` | HTTP 请求方法，支持 `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`，**留空等价于 `GET`**（保证向后兼容）。仅 `type=http` 生效 |
+| `httpHeaders` | 自定义请求头，**JSON 对象字符串**（如 `{"Authorization":"Bearer xxx"}`）。格式非法时接口返回 400；默认自动带 `User-Agent: LumiPulse`，可被同名自定义头覆盖 |
+| `httpBody` | 请求体纯文本，配合 `POST`/`PUT` 的健康检查接口使用；仅 `http` 类型且方法允许携带正文时发送 |
+| `expectStatus` | 期望状态码模式，支持单值 `200`、列表 `200,301`、区间 `200-299`、通配 `2xx`（逗号分隔可混用）。**留空按默认 `200 ≤ status < 400` 判定** |
+| `expectKeyword` | 期望响应关键字。非空时响应体必须包含该字符串才算成功，用于识别「返回 200 但内容是错误页」；留空表示不校验内容。上限 200 字符 |
+
+> **成功判定统一口径**：一次 HTTP 探测成功 = 状态码符合 `expectStatus`（或默认 200~399）
+> **且**（若配置了）响应体包含 `expectKeyword`。心跳统计、每日统计、延迟分桶、热力图与
+> 延迟分位数全部使用同一判定，监控日志接口还会在每条日志上返回 `isSuccess` 字段，
+> 前端不再自行按状态码猜测。
+>
+> **敏感信息**：`httpHeaders` / `httpBody` 属于敏感信息，管理端读接口（列表、创建/更新响应）
+> 与数据导出**一律返回空串**，不会回显已保存的值。写入时空值表示「保持原值」，
+> 因此编辑表单留空提交不会覆盖已保存的请求头/请求体。相应地，导出文件重新导入后
+> 这两个字段为空，需要重新填写。
+
+> **HTTPS 证书监控**：HTTPS 服务探测成功时，检查器会把对端叶子证书的到期时间写回
+> `certExpiresAt`（RFC3339，UTC），公开总览 / 服务接口都会返回该字段；纯 HTTP 服务与
+> TCP 探测（不做 TLS 握手）不会写回，字段省略。剩余 **< 30 天**、**< 7 天**（含已过期）
+> 各发送一次通知（邮件 + webhook `cert_expiring`），同一等级不会重复提醒，证书续期后重新计数。
 
 **响应** (201)
 
@@ -1213,6 +1580,7 @@ POST /api/v1/admin/services
     "url": "https://api.example.com/health",
     "type": "http",
     "interval": 60,
+    "timeoutSeconds": 10,
     "status": "operational",
     "isActive": true,
     "sortOrder": 0,
@@ -1249,6 +1617,11 @@ GET /api/v1/admin/services
       "status": "operational",
       "isActive": true,
       "sortOrder": 0,
+      "httpMethod": "POST",
+      "httpHeaders": "",
+      "httpBody": "",
+      "expectStatus": "200-299",
+      "expectKeyword": "\"status\":\"ok\"",
       "createdAt": "...",
       "updatedAt": "...",
       "uptime": 99.49,
@@ -1257,6 +1630,8 @@ GET /api/v1/admin/services
   ]
 }
 ```
+
+> `httpHeaders` / `httpBody` 恒为空串（敏感信息不回显），其余探测配置原样返回。
 
 #### 更新服务
 
@@ -1271,9 +1646,72 @@ PUT /api/v1/admin/services/:id
   "name": "API 服务 v2",
   "url": "https://api-v2.example.com/health",
   "status": "operational",
-  "isActive": true
+  "isActive": true,
+  "httpMethod": "GET",
+  "expectStatus": "",
+  "expectKeyword": "",
+  "httpHeaders": "",
+  "httpBody": ""
 }
 ```
+
+探测高级匹配字段的写入语义：
+
+| 字段 | 未传（省略） | 传空串 | 传非空值 |
+| --- | --- | --- | --- |
+| `httpMethod` | 保持原值 | 归一化为 `GET` | 使用传入值 |
+| `expectStatus` | 保持原值 | 清空，回到默认 200~399 判定 | 使用传入值（格式非法返回 400） |
+| `expectKeyword` | 保持原值 | 清空，不校验响应内容 | 使用传入值 |
+| `httpHeaders` | 保持原值 | **保持原值**（敏感字段不回显，留空即不变） | 使用传入值（JSON 非法返回 400） |
+| `httpBody` | 保持原值 | **保持原值**（同上） | 使用传入值 |
+| `folderId` | 保持原值 | **清空分组**（回到未分组） | 归入指定分组（分组不存在返回 400） |
+
+> 创建服务时的 `folderId` 传 `0` 或省略即「未分组」。
+
+#### 服务分组（服务聚合文件夹）
+
+服务分组把多个服务聚合在一起，公开首页把它们融合成一个条目展示；点击展开后再看各服务明细
+（融合信息消失）。分组只影响展示口径，探测、事件与 SLA 统计仍然按服务计算。
+
+```
+GET    /api/v1/admin/service-folders          # 列表（带 serviceCount）
+GET    /api/v1/admin/service-folders/summary  # 各分组的融合结果（含未在首页展示的分组）
+POST   /api/v1/admin/service-folders          # 创建
+PUT    /api/v1/admin/service-folders/:id      # 修改
+DELETE /api/v1/admin/service-folders/:id      # 删除（服务不会被删除，只是变回未分组）
+PUT    /api/v1/admin/services/:id/folder      # 把服务移动到分组
+```
+
+创建 / 修改请求：
+
+```json
+{
+  "name": "核心集群",
+  "description": "网关与认证服务",
+  "showOnHomepage": true,
+  "sortOrder": 0
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `name` | 分组名称（必填，≤100 字符） |
+| `showOnHomepage` | 是否在公开首页展示。关闭后该分组及其下所有服务都不会出现在公开首页；创建时省略默认 `true` |
+| `sortOrder` | 排序值（升序，同值按 ID） |
+
+修改接口的 `name` / `description` / `showOnHomepage` / `sortOrder` 均为**指针语义**：不传表示不修改。
+
+移动服务到分组：
+
+```json
+{ "folderId": 2 }
+```
+
+`folderId` 传 `null` 或 `0` 表示取消分组；分组不存在返回 400。
+`GET /admin/services` 返回的服务对象会带 `folderId` 与 `folderName`，可直接用于表单回显。
+
+`GET /admin/service-folders/summary` 的响应结构与公开总览的 `folders` 完全一致
+（融合口径见「状态总览」一节）。
 
 #### 删除服务
 
@@ -1461,11 +1899,34 @@ PATCH /api/v1/admin/incidents/:id
 {
   "impact": "major",
   "status": "resolved",
-  "title": "API 服务中断（已恢复）"
+  "title": "API 服务中断（已恢复）",
+  "rootCause": "数据库连接池被慢查询耗尽",
+  "resolution": "扩容连接池并给慢查询补上索引",
+  "postmortemUrl": "https://example.com/postmortems/2026-05-08",
+  "postmortemPublic": true,
+  "acknowledged": true
 }
 ```
 
+| 字段 | 说明 |
+| --- | --- |
+| `title` / `impact` / `status` | 与历史行为一致：**空字符串表示不修改** |
+| `rootCause` / `resolution` / `postmortemUrl` | 事后复盘内容。与上面三个字段不同，这几个字段是**指针语义**：传空字符串表示清空，不传表示保持原值 |
+| `postmortemPublic` | 是否在公开页面展示复盘内容（默认 `false`，即仅内部可见） |
+| `acknowledged` | 人工确认开关（指针语义）。置 `true` 记录 `acknowledgedAt` / `acknowledgedBy` 并**停止告警升级**；置 `false` 会清空确认信息并重置升级计数，重新进入未确认流程 |
+
 当 `status` 设为 `resolved` 时，自动恢复关联服务状态为 `operational`。
+
+确认 / 取消确认都会在同一事务之外追加一条 `status=system` 的进展记录，用于回溯谁在何时接手。
+
+**事件对象新增字段**
+
+| 字段 | 说明 |
+| --- | --- |
+| `acknowledged` | 是否已被人工确认 |
+| `acknowledgedAt` / `acknowledgedBy` | 确认时间与确认人（单管理员模型下为管理员用户名）。公开接口一律清空这两个字段 |
+| `escalationCount` | 已发送的升级通知次数 |
+| `lastEscalatedAt` | 上次升级通知时间（RFC3339） |
 
 #### 删除事件
 
@@ -1641,6 +2102,45 @@ DELETE /api/v1/admin/maintenances/:id
 
 所有密钥管理接口需携带 `Authorization: Bearer <token>` 头（支持会话 Token 和 API Key 两种认证方式）。
 
+> **凭据差异**：会话 Token 不受限制；API 密钥受下面的 `scope` 限制，且三类高危操作
+> （删除服务 / 导入覆盖数据 / 修改管理员账号）**一律不接受 API 密钥**，只能用会话登录调用，
+> 否则返回 403。
+
+#### 权限范围与限流
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `scope` | `read`（默认）/ `write` | `read` 只允许 `GET` / `HEAD` / `OPTIONS`；写方法返回 403。创建时留空按 `read` 处理（最小权限） |
+| `rateLimitPerMinute` | `0` ~ `6000` | 每分钟请求上限，`0`（默认）表示不限制；超出返回 **429**，并带 `Retry-After: 60` |
+
+> 升级说明：历史密钥在数据库迁移时统一置为 `read`。如果某个已有密钥本来用于写操作，
+> 需要在「API 密钥管理」里把它的范围改成 `write`。
+
+**403 响应**
+
+```json
+{
+  "code": 403,
+  "message": "该 API 密钥为只读范围，不允许写操作"
+}
+```
+
+```json
+{
+  "code": 403,
+  "message": "该操作仅允许在管理后台登录后执行，API 密钥不可调用"
+}
+```
+
+**429 响应**
+
+```json
+{
+  "code": 429,
+  "message": "API 密钥请求过于频繁，请稍后重试"
+}
+```
+
 #### 获取密钥列表
 
 ```
@@ -1664,6 +2164,8 @@ GET /api/v1/admin/api-keys
       "lastUsedAt": "2026-05-09T12:00:00Z",
       "lastUsedIP": "192.168.1.100",
       "isActive": true,
+      "scope": "read",
+      "rateLimitPerMinute": 0,
       "createdAt": "2026-01-01T00:00:00Z"
     }
   ]
@@ -1683,11 +2185,17 @@ POST /api/v1/admin/api-keys
 ```json
 {
   "name": "开发环境密钥",
-  "expiresAt": "2027-01-01T00:00:00Z"
+  "expiresAt": "2027-01-01T00:00:00Z",
+  "scope": "read",
+  "rateLimitPerMinute": 120
 }
 ```
 
-`expiresAt` 为空表示永久有效。
+`expiresAt` 为空表示永久有效。推荐使用 RFC3339（如 `2027-01-01T00:00:00+08:00`）；
+为兼容手工调用，无时区的 `YYYY-MM-DDTHH:mm[:ss]` 也会被接受，并按北京时间（UTC+8）解释。
+无法解析的值会被视为已过期。
+
+`scope` 省略时按 `read` 处理；`rateLimitPerMinute` 省略或为 `0` 表示不限制。
 
 **响应** (201)
 
@@ -1701,22 +2209,29 @@ POST /api/v1/admin/api-keys
     "key": "lp_d3b0f29a1c8e4f7b2a5d9c3e6f8b0a1d2c4e6f8a0b1c3d5e7f9a0b2c4d6e8f",
     "keyPrefix": "lp_d3b0f2",
     "expiresAt": "2027-01-01T00:00:00Z",
+    "scope": "read",
+    "rateLimitPerMinute": 120,
     "createdAt": "2026-05-09T00:00:00Z"
   }
 }
 ```
 
-#### 更新密钥名称
+#### 更新密钥
 
 ```
 PUT /api/v1/admin/api-keys/:id
 ```
 
+用于改名称、调整权限范围（例如把迁移后的历史密钥改成 `write`）与限流。
+`scope` / `rateLimitPerMinute` 不传表示保持原值。
+
 **请求**
 
 ```json
 {
-  "name": "生产环境密钥"
+  "name": "生产环境密钥",
+  "scope": "write",
+  "rateLimitPerMinute": 0
 }
 ```
 

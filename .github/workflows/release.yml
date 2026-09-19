@@ -43,6 +43,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+      # 避免格式再次漂移（历史上混入过 CRLF 与对齐问题）
+      - name: Check gofmt
+        run: |
+          cd ./backend
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未通过 gofmt，请在 backend/ 下执行 gofmt -w .："
+            echo "$unformatted"
+            exit 1
+          fi
       - name: Build
         run: |
           cd ./backend

@@ -4,17 +4,27 @@ import { api } from '../../api/client'
 import type { DashboardStats, Incident, Maintenance } from '../../api/types'
 import ServiceMatrix from '../ServiceMatrix.vue'
 import { useToast } from '../../composables/useToast'
+import { useI18n } from '../../composables/useI18n'
 
 const emit = defineEmits<{
   navigate: [section: string, serviceId?: number]
 }>()
 
 const { show: toast } = useToast()
+const { t, formatDateTime } = useI18n()
 
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(true)
 const dailyStats = ref<Map<number, [number, number, number][]>>(new Map())
 const maintenances = ref<Maintenance[]>([])
+
+/** 事件状态文案，随语言切换 */
+const incidentStatusLabel = computed<Record<string, string>>(() => ({
+  investigating: t('admin.home.incidentInvestigating'),
+  identified: t('admin.home.incidentIdentified'),
+  monitoring: t('admin.home.incidentMonitoring'),
+  resolved: t('admin.home.incidentResolved'),
+}))
 
 const activeMaintenances = computed(() =>
   maintenances.value.filter(m => m.status === 'scheduled' || m.status === 'in_progress')
@@ -40,7 +50,7 @@ function getServiceDays(serviceId: number): [number, number, number][] {
 function formatCST(iso: string): string {
   if (!iso) return ''
   const s = /[Z+-]/.test(iso) ? iso : iso + '+08:00'
-  return new Date(s).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  return formatDateTime(s)
 }
 
 const statusClass = (s: string) => {
@@ -87,7 +97,7 @@ onMounted(async () => {
     maintenances.value = maintRes.data
     await loadDailyStats()
   } catch (e: any) {
-    toast(e.message || '加载失败')
+    toast(e.message || t('admin.home.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -96,13 +106,13 @@ onMounted(async () => {
 
 <template>
   <div>
-    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">加载中...</div>
+    <div v-if="loading" class="text-center py-12" style="color: var(--text-color); opacity: 0.4;">{{ t('common.loading') }}</div>
 
     <template v-if="stats">
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-5">
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">服务总数</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.totalServices') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">{{ stats.totalServices }}</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 flex items-center justify-center">
@@ -111,7 +121,7 @@ onMounted(async () => {
         </div>
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">正常运行</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.operational') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">{{ stats.operationalCount }}</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-emerald-50 dark:bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 flex items-center justify-center">
@@ -120,7 +130,7 @@ onMounted(async () => {
         </div>
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">发生故障</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.outages') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">{{ stats.outageCount + stats.degradedCount }}</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400 flex items-center justify-center">
@@ -129,7 +139,7 @@ onMounted(async () => {
         </div>
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">维护中</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.maintenance') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">{{ stats.activeMaintenances }}</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-500 dark:text-amber-400 flex items-center justify-center">
@@ -138,7 +148,7 @@ onMounted(async () => {
         </div>
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">整体在线率</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.overallUptime') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">{{ overallUptime.toFixed(1) }}%</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-cyan-50 dark:bg-cyan-900/30 text-cyan-500 dark:text-cyan-400 flex items-center justify-center">
@@ -147,7 +157,7 @@ onMounted(async () => {
         </div>
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">平均响应</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.avgResponse') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">{{ avgLatency }}ms</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-purple-50 dark:bg-purple-900/30 text-purple-500 dark:text-purple-400 flex items-center justify-center">
@@ -160,9 +170,9 @@ onMounted(async () => {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-5 mt-3 md:mt-5">
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">近30天事件</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.recentIncidents') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">{{ stats.recentIncidentsTotal }}</div>
-            <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">已解决 {{ stats.recentIncidentsResolved }}</div>
+            <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.home.resolved', { n: stats.recentIncidentsResolved }) }}</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-500 dark:text-indigo-400 flex items-center justify-center">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13h4v8H3zM10 9h4v12h-4zM17 5h4v16h-4z" /></svg>
@@ -170,11 +180,11 @@ onMounted(async () => {
         </div>
         <div class="rounded-xl p-3 md:p-5 flex justify-between items-center" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div>
-            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">解决率</div>
+            <div class="text-sm mb-1" style="color: var(--text-color); opacity: 0.5;">{{ t('admin.home.resolutionRate') }}</div>
             <div class="text-2xl md:text-3xl font-bold " style="color: var(--text-color);">
               {{ stats.recentIncidentsTotal > 0 ? ((stats.recentIncidentsResolved / stats.recentIncidentsTotal) * 100).toFixed(0) + '%' : 'N/A' }}
             </div>
-            <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">近30天</div>
+            <div class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.home.last30Days') }}</div>
           </div>
           <div class="w-8 h-8 md:w-12 md:h-12 rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-500 dark:text-teal-400 flex items-center justify-center">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -184,20 +194,20 @@ onMounted(async () => {
 
       <div class="rounded-xl mt-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
         <div class="p-5 border-b flex justify-between items-center" style="border-color: var(--button-border-color);">
-          <h3 class="font-bold " style="color: var(--text-color);">服务列表</h3>
-          <button @click="emit('navigate', 'services')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">管理</button>
+          <h3 class="font-bold " style="color: var(--text-color);">{{ t('admin.home.serviceList') }}</h3>
+          <button @click="emit('navigate', 'services')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">{{ t('admin.home.manage') }}</button>
         </div>
         <div class="overflow-x-auto thin-scroll">
           <table class="w-full text-left text-sm">
           <thead class="text-xs border-b" style="color: var(--text-color); background-color: var(--button-hover-color); opacity: 0.5; border-color: var(--button-border-color);">
             <tr>
-              <th class="px-6 py-3 font-medium">服务名称</th>
-              <th class="px-6 py-3 font-medium">URL</th>
-              <th class="px-6 py-3 font-medium">类型</th>
-              <th class="px-6 py-3 font-medium">状态</th>
-              <th class="px-6 py-3 font-medium">在线率</th>
-              <th class="px-6 py-3 font-medium">响应时间</th>
-              <th class="px-6 py-3 font-medium">探测频率</th>
+              <th class="px-6 py-3 font-medium">{{ t('admin.home.colServiceName') }}</th>
+              <th class="px-6 py-3 font-medium">{{ t('admin.home.colUrl') }}</th>
+              <th class="px-6 py-3 font-medium">{{ t('admin.home.colType') }}</th>
+              <th class="px-6 py-3 font-medium">{{ t('admin.home.colStatus') }}</th>
+              <th class="px-6 py-3 font-medium">{{ t('admin.home.colUptime') }}</th>
+              <th class="px-6 py-3 font-medium">{{ t('admin.home.colResponseTime') }}</th>
+              <th class="px-6 py-3 font-medium">{{ t('admin.home.colProbeInterval') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y">
@@ -210,7 +220,7 @@ onMounted(async () => {
                   <span :class="['w-1.5 h-1.5 rounded-full',
                     svc.status === 'operational' ? 'bg-emerald-500' : svc.status === 'degraded' ? 'bg-yellow-400' : 'bg-red-500'
                   ]" />
-                  {{ svc.status === 'operational' ? '正常' : svc.status === 'degraded' ? '性能下降' : '故障' }}
+                  {{ svc.status === 'operational' ? t('admin.home.statusOperational') : svc.status === 'degraded' ? t('admin.home.statusDegraded') : t('admin.home.statusOutage') }}
                 </span>
               </td>
               <td class="px-6 py-4">
@@ -231,8 +241,8 @@ onMounted(async () => {
         <!-- Incidents card -->
         <div class="rounded-xl p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div class="flex justify-between items-center mb-4">
-            <h3 class="font-bold " style="color: var(--text-color);">活跃事件</h3>
-            <button @click="emit('navigate', 'incidents')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">管理</button>
+            <h3 class="font-bold " style="color: var(--text-color);">{{ t('admin.home.activeIncidents') }}</h3>
+            <button @click="emit('navigate', 'incidents')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">{{ t('admin.home.manage') }}</button>
           </div>
           <template v-if="stats.recentIncidents && stats.recentIncidents.length > 0">
             <div v-for="inc in stats.recentIncidents" :key="inc.id" @click="emit('navigate', 'incidents')" class="flex items-start gap-3 py-2 border-b last:border-0 cursor-pointer hover:bg-[var(--button-hover-color)] rounded-lg px-2 -mx-2" style="border-color: var(--button-border-color);">
@@ -241,18 +251,18 @@ onMounted(async () => {
               ]" />
               <div>
                 <div class="text-sm font-medium " style="color: var(--text-color);">{{ inc.title }}</div>
-                <div class="text-xs mt-0.5" style="color: var(--text-color); opacity: 0.5;">{{ { investigating: '调查中', identified: '已确认', monitoring: '监控中', resolved: '已解决' }[inc.status] || inc.status }}</div>
+                <div class="text-xs mt-0.5" style="color: var(--text-color); opacity: 0.5;">{{ incidentStatusLabel[inc.status] || inc.status }}</div>
               </div>
             </div>
           </template>
-          <div v-else class="text-sm py-4 text-center" style="color: var(--text-color); opacity: 0.4;">暂无活跃事件</div>
+          <div v-else class="text-sm py-4 text-center" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.home.noActiveIncidents') }}</div>
         </div>
 
         <!-- Maintenance card -->
         <div class="rounded-xl p-5" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
           <div class="flex justify-between items-center mb-4">
-            <h3 class="font-bold " style="color: var(--text-color);">维护计划</h3>
-            <button @click="emit('navigate', 'maintenances')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">管理</button>
+            <h3 class="font-bold " style="color: var(--text-color);">{{ t('admin.home.maintenances') }}</h3>
+            <button @click="emit('navigate', 'maintenances')" class="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">{{ t('admin.home.manage') }}</button>
           </div>
           <template v-if="activeMaintenances.length > 0">
             <div v-for="m in activeMaintenances" :key="m.id" @click="emit('navigate', 'maintenances')" class="py-2 border-b last:border-0 cursor-pointer hover:bg-[var(--button-hover-color)] rounded-lg px-2 -mx-2" style="border-color: var(--button-border-color);">
@@ -260,7 +270,7 @@ onMounted(async () => {
               <div class="text-xs mt-0.5" style="color: var(--text-color); opacity: 0.5;">{{ formatCST(m.scheduledStart) }} - {{ formatCST(m.scheduledEnd) }}</div>
             </div>
           </template>
-          <div v-else class="text-sm py-4 text-center" style="color: var(--text-color); opacity: 0.4;">暂无维护计划</div>
+          <div v-else class="text-sm py-4 text-center" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.home.noMaintenances') }}</div>
         </div>
       </div>
     </template>
