@@ -8,7 +8,9 @@ const router = useRouter()
 const { t, formatMatrixDate, formatDuration } = useI18n()
 
 const props = defineProps<{
-  days: [number, number, number][]
+  /** 每天一个四元组 [upCount, downCount, statusCode, maintenanceCount]；
+   *  maintenanceCount 是维护窗口内的失败次数（不计入可用率），用蓝色展示 */
+  days: [number, number, number, number][]
   uptime: number
   hideLegend?: boolean
   compact?: boolean
@@ -19,6 +21,9 @@ const props = defineProps<{
 const GREEN = { r: 69, g: 186, b: 101 }
 const YELLOW = { r: 249, g: 172, b: 5 }
 const RED = { r: 223, g: 45, b: 42 }
+/** 维护窗口内的异常：蓝色，与真实故障的红色区分 */
+const MAINTENANCE_COLOR = 'var(--maintenance-color, #3b82f6)'
+const NO_DATA_COLOR = 'var(--matrix-no-data, #e5e7eb)'
 
 function lerpColor(a: typeof GREEN, b: typeof GREEN, t: number): string {
   const r = Math.round(a.r + (b.r - a.r) * t)
@@ -35,11 +40,28 @@ function getUptimeColor(uptime: number): string {
 }
 
 function getColorForDowntime(down: number): string {
-  if (down === -1) return 'var(--matrix-no-data, #e5e7eb)'
+  if (down === -1) return NO_DATA_COLOR
   if (down === 0) return `#${GREEN.r.toString(16).padStart(2, '0')}${GREEN.g.toString(16).padStart(2, '0')}${GREEN.b.toString(16).padStart(2, '0')}`
   if (down < 30) return lerpColor(GREEN, YELLOW, down / 30)
   if (down < 60) return lerpColor(YELLOW, RED, (down - 30) / 30)
   return `#${RED.r.toString(16).padStart(2, '0')}${RED.g.toString(16).padStart(2, '0')}${RED.b.toString(16).padStart(2, '0')}`
+}
+
+/**
+ * 格子颜色。
+ * - 窗口外的失败是真实故障 → 绿→黄→红 渐变（高亮程度按失败次数）
+ * - 只有维护窗口内的失败（计划内停机）→ 蓝色
+ */
+function getCellColor(pair: [number, number, number, number] | undefined): string {
+  if (!pair) return NO_DATA_COLOR
+  if (pair[1] > 0) return getColorForDowntime(pair[1])
+  if (pair[1] === 0 && pair[3] > 0) return MAINTENANCE_COLOR
+  return getColorForDowntime(pair[1])
+}
+
+/** 悬浮提示里圆点的颜色，与格子保持一致 */
+function getTooltipColor(pair: [number, number, number, number]): string {
+  return getCellColor(pair)
 }
 
 const hoveredIndex = ref(-1)
@@ -93,7 +115,7 @@ function dateKey(index: number, total: number): string {
       <div
         v-for="(pair, i) in days"
         :key="i"
-        :style="{ backgroundColor: getColorForDowntime(pair[1]) }"
+        :style="{ backgroundColor: getCellColor(pair) }"
         class="flex-1 h-full rounded-[1px] cursor-pointer hover:brightness-110 hover:scale-y-110"
         style="transition: background-color 0.15s ease, transform 0.1s ease, filter 0.1s ease;"
         @mouseenter="onCellEnter($event, i)"
@@ -124,16 +146,15 @@ function dateKey(index: number, total: number): string {
             {{ t('status.noData') }}
           </div>
         </template>
-        <template v-else-if="days[hoveredIndex][1] === 0">
-          <div class="flex items-center gap-2 text-sm" :style="{ color: getColorForDowntime(0) }">
-            <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(0) }" />
-            {{ t('status.healthyToday') }}
-          </div>
-        </template>
-        <template v-else>
-          <div class="flex items-center gap-2 text-sm font-medium" :style="{ color: getColorForDowntime(days[hoveredIndex][1]) }">
-            <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(days[hoveredIndex][1]) }" />
+        <template v-else-if="days[hoveredIndex][1] > 0">
+          <div class="flex items-center gap-2 text-sm font-medium" :style="{ color: getTooltipColor(days[hoveredIndex]) }">
+            <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getTooltipColor(days[hoveredIndex]) }" />
             {{ t('status.downtimeLabel', { duration: formatDuration(days[hoveredIndex][1]) }) }}
+          </div>
+          <!-- 同一天既有真实故障又有计划内停机时，把维护期的部分单独标出来 -->
+          <div v-if="days[hoveredIndex][3] > 0" class="flex items-center gap-2 text-xs mt-1 text-[color:var(--maintenance-color)]">
+            <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: 'var(--maintenance-color)' }" />
+            {{ t('status.maintenanceExtraLabel', { duration: formatDuration(days[hoveredIndex][3]) }) }}
           </div>
           <template v-if="incidentsByDate && serviceId">
             <div
@@ -150,6 +171,19 @@ function dateKey(index: number, total: number): string {
               {{ inc.title }}
             </div>
           </template>
+        </template>
+        <!-- 只有维护窗口内的失败：计划内停机，用蓝色而不是红色 -->
+        <template v-else-if="days[hoveredIndex][3] > 0">
+          <div class="flex items-center gap-2 text-sm font-medium text-[color:var(--maintenance-color)]">
+            <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: 'var(--maintenance-color)' }" />
+            {{ t('status.maintenanceDowntimeLabel', { duration: formatDuration(days[hoveredIndex][3]) }) }}
+          </div>
+        </template>
+        <template v-else>
+          <div class="flex items-center gap-2 text-sm" :style="{ color: getColorForDowntime(0) }">
+            <span class="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" :style="{ backgroundColor: getColorForDowntime(0) }" />
+            {{ t('status.healthyToday') }}
+          </div>
         </template>
       </template>
     </div>

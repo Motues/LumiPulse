@@ -27,6 +27,7 @@
 | `expect_status` | TEXT | DEFAULT '' | 期望状态码模式，支持 `200` / `200,301` / `200-299` / `2xx` 组合（逗号分隔）。空值沿用默认判定 `200 ≤ status < 400` |
 | `expect_keyword` | TEXT | DEFAULT '' | 期望响应关键字。非空时响应体必须包含该字符串才算成功；空值表示不校验内容 |
 | `folder_id` | INTEGER | DEFAULT NULL | 所属服务分组 ID；空值表示未分组（在首页独立展示）。分组删除时置空，服务本身不受影响 |
+| `homepage_blocks` | TEXT | DEFAULT '' | 公开状态页要展示的内容块，逗号分隔（`metrics` / `interval` / `cert` / `latency` / `heatmap` / `history`）。空串 = 全部展示，`none` = 全部不展示；只影响公开页面 |
 | `created_at` | DATETIME | DEFAULT (datetime('now')) | 创建时间 |
 | `updated_at` | DATETIME | DEFAULT (datetime('now')) | 最后更新时间 |
 
@@ -84,8 +85,9 @@
 | `service_id` | INTEGER | NOT NULL REFERENCES `Service`(`id`) ON DELETE CASCADE | 关联的服务 ID |
 | `date` | TEXT | NOT NULL | 日期（格式：YYYY-MM-DD） |
 | `uptime_count` | INTEGER | DEFAULT 0 | 成功检查次数 |
-| `downtime_count` | INTEGER | DEFAULT 0 | 失败检查次数 |
+| `downtime_count` | INTEGER | DEFAULT 0 | 失败检查次数（不含维护窗口内的失败，可用率口径不变） |
 | `total_latency` | INTEGER | DEFAULT 0 | 当日总延迟累加 |
+| `maintenance_count` | INTEGER | DEFAULT 0 | 维护窗口内的失败探测次数。属于计划内停机，不计入 `downtime_count`，仅用于把矩阵格子显示为蓝色 |
 
 约束：`UNIQUE(service_id, date)`
 

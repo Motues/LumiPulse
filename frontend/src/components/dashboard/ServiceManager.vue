@@ -7,6 +7,7 @@ import { useToast } from '../../composables/useToast'
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges'
 import { useI18n } from '../../composables/useI18n'
 import CustomSelect from './CustomSelect.vue'
+import { HOMEPAGE_BLOCKS, parseHomepageBlocks, serializeHomepageBlocks } from '../../utils/homepageBlocks'
 
 const props = defineProps<{
   pendingServiceId?: number
@@ -53,9 +54,35 @@ const defaultForm = () => ({
   expectKeyword: '',
   /** 所属服务分组。0 表示未分组（后端按取消分组处理） */
   folderId: 0,
+  /**
+   * 公开首页「服务详情」展示的内容块（逗号分隔）。
+   * 新增服务默认全部展示；显式写全 key 而不是空串，
+   * 因为空串在后端会被规范化成「全部不展示」。
+   */
+  homepageBlocks: serializeHomepageBlocks(HOMEPAGE_BLOCKS),
 })
 const form = ref(defaultForm())
 const showAdvanced = ref(false)
+
+/** 首页展示内容块开关（顺序与 utils/homepageBlocks.ts 一致） */
+const homepageBlockOptions = computed(() => [
+  { key: 'metrics', label: t('admin.service.blockMetrics') },
+  { key: 'interval', label: t('admin.service.blockInterval') },
+  { key: 'cert', label: t('admin.service.blockCert') },
+  { key: 'latency', label: t('admin.service.blockLatency') },
+  { key: 'heatmap', label: t('admin.service.blockHeatmap') },
+  { key: 'history', label: t('admin.service.blockHistory') },
+])
+
+const selectedHomepageBlocks = computed(() => parseHomepageBlocks(form.value.homepageBlocks))
+
+function toggleHomepageBlock(key: string, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  const selected = new Set(selectedHomepageBlocks.value)
+  if (checked) selected.add(key)
+  else selected.delete(key)
+  form.value.homepageBlocks = serializeHomepageBlocks(HOMEPAGE_BLOCKS.filter(k => selected.has(k)))
+}
 /**
  * 请求头输入框的占位提示：编辑态说明留空语义，新增态给一个 JSON 示例。
  * 示例里带引号，放模板属性里会破坏 attribute 解析，因此放脚本里。
@@ -146,6 +173,8 @@ function openEdit(svc: ServiceDetail) {
     expectStatus: svc.expectStatus || '',
     expectKeyword: svc.expectKeyword || '',
     folderId: svc.folderId || 0,
+    // 归一化后再回填：后端把「全部不展示」存成 none，直接回填空串会被重新解释成「全部展示」
+    homepageBlocks: serializeHomepageBlocks(parseHomepageBlocks(svc.homepageBlocks)),
   }
   // 已配置过高级匹配时默认展开，避免看不出服务被特殊配置过
   showAdvanced.value = !!(svc.expectStatus || svc.expectKeyword || (svc.httpMethod && svc.httpMethod !== 'GET'))
@@ -337,7 +366,7 @@ watch(() => props.pendingServiceId, (id) => {
 
     <!-- Form Modal -->
     <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="handleCloseSvc">
-      <div class="rounded-xl p-4 md:p-6 w-full max-w-lg mx-4" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
+      <div class="rounded-xl p-4 md:p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto thin-scroll" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
         <h3 class="text-lg font-bold mb-4" style="color: var(--text-color);">{{ editing ? t('admin.service.editTitle') : t('admin.service.add') }}</h3>
         <div class="space-y-4">
           <div>
@@ -376,6 +405,28 @@ watch(() => props.pendingServiceId, (id) => {
             />
             <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.service.folderHint') }}</p>
           </div>
+
+          <!-- 公开首页展示内容：只影响公开页面，管理后台始终展示全部 -->
+          <div class="pt-2" style="border-top: 1px solid var(--button-border-color);">
+            <label class="block text-sm font-medium mb-1" style="color: var(--text-color); opacity: 0.7;">{{ t('admin.service.formHomepageBlocks') }}</label>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm" style="color: var(--text-color);">
+              <label
+                v-for="block in homepageBlockOptions"
+                :key="block.key"
+                class="inline-flex items-center gap-2 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedHomepageBlocks.has(block.key)"
+                  @change="toggleHomepageBlock(block.key, $event)"
+                  class="accent-emerald-500"
+                />
+                {{ block.label }}
+              </label>
+            </div>
+            <p class="text-xs mt-1" style="color: var(--text-color); opacity: 0.4;">{{ t('admin.service.formHomepageBlocksHint') }}</p>
+          </div>
+
           <div class="flex items-center justify-between pt-2">
             <span class="text-sm font-medium" style="color: var(--text-color);">{{ t('admin.service.formShowOnHomepage') }}</span>
             <label class="relative inline-flex items-center cursor-pointer">

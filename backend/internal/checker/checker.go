@@ -372,6 +372,10 @@ func (hc *HealthChecker) probeAndRecord(ctx context.Context, svc *model.Service,
 			daily.UptimeCount++
 		} else if !inMaint[svc.ID] {
 			daily.DowntimeCount++
+		} else {
+			// 维护窗口内的失败属于计划内停机：不计入可用率，
+			// 但单独计数，前端矩阵据此用蓝色（而不是红色）展示
+			daily.MaintenanceCount++
 		}
 		daily.TotalLatency += latency
 		if err := hc.repo.UpdateServiceDaily(ctx, daily); err != nil {

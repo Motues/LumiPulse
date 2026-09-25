@@ -16,7 +16,8 @@ import (
 // 探测配置新增字段时只需改这一处，避免 SELECT 漏列导致字段静默为空。
 const serviceColumns = `s.id, s.name, s.description, s.url, s.type, s.interval, s.status, s.is_active, s.sort_order,
 	s.show_on_homepage, s.insecure_skip_verify, s.timeout_seconds, s.cert_expires_at, s.cert_notify_level, s.public_hash,
-	s.http_method, s.http_headers, s.http_body, s.expect_status, s.expect_keyword, s.folder_id, s.created_at, s.updated_at`
+	s.http_method, s.http_headers, s.http_body, s.expect_status, s.expect_keyword, s.folder_id, s.homepage_blocks,
+	s.created_at, s.updated_at`
 
 // serviceSelectColumns 带分组名的查询列（管理端列表回显用）
 const serviceSelectColumns = serviceColumns + `, COALESCE(f.name, '') AS folder_name`
@@ -30,11 +31,11 @@ func (r *repo) CreateService(ctx context.Context, s *model.Service) error {
 		s.PublicHash = utils.GeneratePublicHash()
 	}
 	query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, insecure_skip_verify, timeout_seconds, public_hash,
-				  http_method, http_headers, http_body, expect_status, expect_keyword, folder_id, created_at, updated_at)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				  http_method, http_headers, http_body, expect_status, expect_keyword, folder_id, homepage_blocks, created_at, updated_at)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	res, err := r.db.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
 		"operational", true, s.SortOrder, s.ShowOnHomepage, s.InsecureSkipVerify, s.TimeoutSeconds, s.PublicHash,
-		s.HTTPMethod, s.HTTPHeaders, s.HTTPBody, s.ExpectStatus, s.ExpectKeyword, s.FolderID, now, now)
+		s.HTTPMethod, s.HTTPHeaders, s.HTTPBody, s.ExpectStatus, s.ExpectKeyword, s.FolderID, s.HomepageBlocks, now, now)
 	if err != nil {
 		return err
 	}
@@ -79,11 +80,11 @@ func (r *repo) UpdateService(ctx context.Context, s *model.Service) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	query := `UPDATE Service SET name=?, description=?, url=?, type=?, interval=?, status=?, is_active=?, sort_order=?,
 				  show_on_homepage=?, insecure_skip_verify=?, timeout_seconds=?,
-				  http_method=?, http_headers=?, http_body=?, expect_status=?, expect_keyword=?, folder_id=?, updated_at=?
+				  http_method=?, http_headers=?, http_body=?, expect_status=?, expect_keyword=?, folder_id=?, homepage_blocks=?, updated_at=?
 			  WHERE id=?`
 	_, err := r.db.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
 		s.Status, s.IsActive, s.SortOrder, s.ShowOnHomepage, s.InsecureSkipVerify, s.TimeoutSeconds,
-		s.HTTPMethod, s.HTTPHeaders, s.HTTPBody, s.ExpectStatus, s.ExpectKeyword, s.FolderID, now, s.ID)
+		s.HTTPMethod, s.HTTPHeaders, s.HTTPBody, s.ExpectStatus, s.ExpectKeyword, s.FolderID, s.HomepageBlocks, now, s.ID)
 	if err != nil {
 		return err
 	}

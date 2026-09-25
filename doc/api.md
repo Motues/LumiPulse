@@ -341,7 +341,9 @@ GET /api/v1/summary
         "status": "operational",
         "url": "https://api.example.com",
         "uptime": 99.49,
-        "certExpiresAt": "2026-12-01T00:00:00Z"
+        "interval": 60,
+        "certExpiresAt": "2026-12-01T00:00:00Z",
+        "homepageBlocks": "metrics,interval,cert,latency,heatmap,history"
       }
     ],
     "folders": [
@@ -407,6 +409,24 @@ GET /api/v1/summary
 
 > 服务项里的 `certExpiresAt` 仅 HTTPS 服务有值（对端证书到期时间，RFC3339）；
 > 纯 HTTP 服务与尚未探测成功时该字段省略，可直接用于展示证书剩余天数。
+
+**首页展示内容（`homepageBlocks`）**
+
+每个服务可以单独配置公开状态页要展示哪些内容块，管理后台始终展示全部内容。
+取值是逗号分隔的 key 列表，含义见下表；**空串表示全部展示**（历史数据默认值），
+`none` 表示全部不展示（「一个都不显示」不能用空串表达，否则与默认语义冲突）。
+
+| key | 内容 |
+| --- | --- |
+| `metrics` | 在线率 / 响应时间 |
+| `interval` | 探测频率 |
+| `cert` | 证书到期 |
+| `latency` | 最近 24 小时延迟曲线（含均值 / P95 / P99） |
+| `heatmap` | 响应时间热力图 |
+| `history` | 服务历史矩阵 |
+
+> 首页列表上的 90 天状态矩阵不受该配置影响，始终展示。
+
 
 **服务分组（服务聚合文件夹）**
 
@@ -563,7 +583,7 @@ GET /api/v1/services/:hash/latency?days=1
 | `start` | string | 起始时间（ISO 8601） |
 | `interval` | int | 数据间隔（分钟），固定为 5 |
 | `latencies` | int[] | 延迟数组（毫秒），无数据时为 0 |
-| `statuses` | int[] | 状态数组 |
+| `statuses` | int[] | 状态数组，取值见下 |
 | `stats` | object \| null | 整个查询窗口的分位数汇总，窗口内没有成功样本时为 `null` |
 | `stats.samples` | int | 参与统计的成功样本数 |
 | `stats.avg` | float | 平均延迟（毫秒） |
@@ -572,7 +592,10 @@ GET /api/v1/services/:hash/latency?days=1
 
 每个数据点的时间 = `start + index * interval` 分钟。
 
-`statuses` 取值：`0`=正常、`1`=故障、`-1`=无数据
+`statuses` 取值：`0`=正常、`1`=故障、`2`=维护窗口内的故障、`-1`=无数据
+
+> `statuses = 2` 表示该 5 分钟桶里的失败探测发生在维护计划的时间窗口内
+> （计划内停机），前端用蓝色与真实故障的红色区分。已取消的维护计划不参与该标记。
 
 > 失败判定：一次探测失败的条件是 **不满足** `200 ≤ status < 400` 或 `status = 1`（TCP 成功）。
 > 即 TCP 探测返回 `status = 0` 同样计入故障，与日志页口径一致。
@@ -613,7 +636,7 @@ GET /api/v1/services/:hash/latency-heatmap?days=7
     "days": 7,
     "maxAvg": 300,
     "cells": [
-      { "day": "2026-09-19", "hour": 10, "avg": 200, "samples": 2, "failures": 1 },
+      { "day": "2026-09-19", "hour": 10, "avg": 200, "samples": 2, "failures": 1, "maintenance": true },
       { "day": "2026-09-18", "hour": 23, "avg": 300, "samples": 1, "failures": 0 }
     ]
   }
@@ -628,9 +651,13 @@ GET /api/v1/services/:hash/latency-heatmap?days=7
 | `cells[].avg` | int | 该小时内**成功样本**的平均延迟（毫秒） |
 | `cells[].samples` | int | 成功样本数；为 `0` 且 `failures > 0` 表示该小时全部失败 |
 | `cells[].failures` | int | 该小时内的失败探测次数 |
+| `cells[].maintenance` | bool | 该小时是否落在维护窗口内（仅在有影响本服务的维护计划时出现）。为 `true` 时失败探测属于计划内停机，前端用蓝色展示 |
 
 > 成功 / 失败判定与延迟分桶、分位数接口完全一致（成功 = `200 ≤ status < 400` 或 TCP `status = 1`）。
 > 失败探测的耗时不计入 `avg`。
+
+> 前端在窄屏（<768px）下会把每小时数据按 3 小时聚合成 8 个格子展示，
+> 聚合时按成功样本数加权，并保持 `maintenance` 的或运算结果；接口本身始终按小时返回。
 
 ---
 
@@ -640,7 +667,7 @@ GET /api/v1/services/:hash/latency-heatmap?days=7
 GET /api/v1/services/:hash/daily-stats?days=90
 ```
 
-通过 `publicHash` 获取特定服务每天的健康检查汇总数据，用于前端矩阵展示。每个元素为 `[upCount, downCount, statusCode]` 三元组。
+通过 `publicHash` 获取特定服务每天的健康检查汇总数据，用于前端矩阵展示。每个元素为 `[upCount, downCount, statusCode, maintenanceCount]` 四元组。
 
 **查询参数**
 
@@ -658,15 +685,21 @@ GET /api/v1/services/:hash/daily-stats?days=90
     "serviceId": 1,
     "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
     "days": [
-      [48, 0, 0],
-      [-1, -1, -1],
-      [46, 2, 1]
+      [48, 0, 0, 0],
+      [-1, -1, -1, 0],
+      [46, 2, 1, 0],
+      [40, 0, 0, 5]
     ]
   }
 }
 ```
 
 `statusCode` 取值：`-1`=无数据、`0`=正常、`1`=调查中、`2`=已确认、`3`=监控中、`4`=已解决
+
+`maintenanceCount` 是落在维护计划时间窗口内的**失败探测次数**：这类失败属于计划内停机，
+**不计入 `downCount`**（可用率口径不变），前端把它显示为蓝色以便和真实故障的红色区分。
+同一天既有真实故障又有维护期停机时，格子按真实故障着色，维护期的部分在悬浮提示里单独列出。
+已取消的维护计划不参与该统计。
 
 ---
 
@@ -698,9 +731,9 @@ GET /api/v1/daily-stats?days=90
         "serviceId": 1,
         "publicHash": "3f8a1c0d9b2e7f4a6c5d8e1b0a9f3c72",
         "days": [
-          [48, 0, 0],
-          [-1, -1, -1],
-          [46, 2, 1]
+          [48, 0, 0, 0],
+          [-1, -1, -1, 0],
+          [46, 2, 1, 0]
         ]
       }
     ]
@@ -709,7 +742,8 @@ GET /api/v1/daily-stats?days=90
 ```
 
 `serviceId` 为服务的自增 ID（仅用于前端匹配本地服务列表，不作为 URL 使用），
-`publicHash` 为可安全用于 URL 的公开标识，`days` 数组格式与单服务接口完全一致。
+`publicHash` 为可安全用于 URL 的公开标识，`days` 数组格式与单服务接口完全一致
+（`[upCount, downCount, statusCode, maintenanceCount]` 四元组）。
 
 ---
 
@@ -1534,7 +1568,8 @@ POST /api/v1/admin/services
   "httpHeaders": "{\"Authorization\":\"Bearer xxx\",\"Accept\":\"application/json\"}",
   "httpBody": "{\"probe\":true}",
   "expectStatus": "200-299",
-  "expectKeyword": "\"status\":\"ok\""
+  "expectKeyword": "\"status\":\"ok\"",
+  "homepageBlocks": "metrics,interval,cert,latency,heatmap,history"
 }
 ```
 
@@ -1551,6 +1586,7 @@ POST /api/v1/admin/services
 | `httpBody` | 请求体纯文本，配合 `POST`/`PUT` 的健康检查接口使用；仅 `http` 类型且方法允许携带正文时发送 |
 | `expectStatus` | 期望状态码模式，支持单值 `200`、列表 `200,301`、区间 `200-299`、通配 `2xx`（逗号分隔可混用）。**留空按默认 `200 ≤ status < 400` 判定** |
 | `expectKeyword` | 期望响应关键字。非空时响应体必须包含该字符串才算成功，用于识别「返回 200 但内容是错误页」；留空表示不校验内容。上限 200 字符 |
+| `homepageBlocks` | 公开状态页要展示的内容块，逗号分隔（`metrics` / `interval` / `cert` / `latency` / `heatmap` / `history`）。**省略 = 保持原值（创建时即全部展示）**，传空串 = 全部不展示（落库 `none`），传列表 = 只展示列出的内容块。只影响公开页面，管理后台始终展示全部 |
 
 > **成功判定统一口径**：一次 HTTP 探测成功 = 状态码符合 `expectStatus`（或默认 200~399）
 > **且**（若配置了）响应体包含 `expectKeyword`。心跳统计、每日统计、延迟分桶、热力图与
@@ -1586,6 +1622,7 @@ POST /api/v1/admin/services
     "sortOrder": 0,
     "showOnHomepage": true,
     "insecureSkipVerify": false,
+    "homepageBlocks": "metrics,interval,cert,latency,heatmap,history",
     "createdAt": "2026-05-09T00:00:00Z",
     "updatedAt": "2026-05-09T00:00:00Z"
   }
@@ -1622,6 +1659,7 @@ GET /api/v1/admin/services
       "httpBody": "",
       "expectStatus": "200-299",
       "expectKeyword": "\"status\":\"ok\"",
+      "homepageBlocks": "metrics,interval,cert,latency,heatmap,history",
       "createdAt": "...",
       "updatedAt": "...",
       "uptime": 99.49,
@@ -1665,8 +1703,10 @@ PUT /api/v1/admin/services/:id
 | `httpHeaders` | 保持原值 | **保持原值**（敏感字段不回显，留空即不变） | 使用传入值（JSON 非法返回 400） |
 | `httpBody` | 保持原值 | **保持原值**（同上） | 使用传入值 |
 | `folderId` | 保持原值 | **清空分组**（回到未分组） | 归入指定分组（分组不存在返回 400） |
+| `homepageBlocks` | 保持原值 | **全部不展示** | 只展示列出的内容块（未知 key 自动忽略；全是不认识的 key 时等同空串） |
 
 > 创建服务时的 `folderId` 传 `0` 或省略即「未分组」。
+> `homepageBlocks` 省略时保持原值，创建时即「全部展示」。
 
 #### 服务分组（服务聚合文件夹）
 

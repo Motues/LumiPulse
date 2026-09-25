@@ -153,7 +153,7 @@ func (r *repo) AggregateServiceMonthly(ctx context.Context, from, toExclusive st
 func (r *repo) ListServiceDailiesBetween(ctx context.Context, from, toExclusive string) (map[int64][]*model.ServiceDaily, error) {
 	var rows []*model.ServiceDaily
 	err := r.db.SelectContext(ctx, &rows,
-		`SELECT id, service_id, date, uptime_count, downtime_count, total_latency
+		`SELECT id, service_id, date, uptime_count, downtime_count, total_latency, maintenance_count
 		 FROM ServiceDaily WHERE date >= ? AND date < ? ORDER BY service_id ASC, date ASC`,
 		from, toExclusive)
 	if err != nil {

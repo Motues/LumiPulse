@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -57,6 +58,10 @@ type Service struct {
 	FolderID *int64 `db:"folder_id" json:"folderId,omitempty"`
 	// FolderName 关联查询带出的分组名（不落库，仅用于管理端列表回显）
 	FolderName string `db:"folder_name" json:"folderName,omitempty"`
+	// HomepageBlocks 公开首页「服务详情」要展示的内容块，逗号分隔（见 HomepageBlock* 常量）。
+	// 空串 = 全部展示（历史数据默认值）；HomepageBlocksNone = 全部不展示。
+	// 只影响公开页面的展示，管理后台始终展示全部内容。
+	HomepageBlocks string `db:"homepage_blocks" json:"homepageBlocks"`
 }
 
 // MaskServiceSecrets 清空服务里的敏感探测配置，用于管理端响应回显。
@@ -69,6 +74,68 @@ func (s *Service) MaskServiceSecrets() *Service {
 	s.HTTPHeaders = ""
 	s.HTTPBody = ""
 	return s
+}
+
+// --- 公开首页「服务详情」内容块 ---
+//
+// 每个服务可以单独选择公开首页要展示哪些内容块（探测频率、证书到期、延迟曲线等），
+// 管理后台始终展示全部内容，不受这些开关影响。
+// 存储为逗号分隔的 key 列表：空串是历史数据的默认值，语义为「全部展示」，
+// 因此「什么都不展示」必须用 HomepageBlocksNone 显式表达，不能复用空串。
+const (
+	// HomepageBlockMetrics 在线率 / 响应时间指标
+	HomepageBlockMetrics = "metrics"
+	// HomepageBlockInterval 探测频率
+	HomepageBlockInterval = "interval"
+	// HomepageBlockCert 证书到期
+	HomepageBlockCert = "cert"
+	// HomepageBlockLatency 最近 24 小时延迟曲线（含均值 / P95 / P99）
+	HomepageBlockLatency = "latency"
+	// HomepageBlockHeatmap 响应时间热力图
+	HomepageBlockHeatmap = "heatmap"
+	// HomepageBlockHistory 服务历史矩阵
+	HomepageBlockHistory = "history"
+)
+
+// HomepageBlocksNone 「全部不展示」的显式标记
+const HomepageBlocksNone = "none"
+
+// homepageBlockKeys 全部可配置内容块，顺序即「全部展示」时的输出顺序
+var homepageBlockKeys = []string{
+	HomepageBlockMetrics,
+	HomepageBlockInterval,
+	HomepageBlockCert,
+	HomepageBlockLatency,
+	HomepageBlockHeatmap,
+	HomepageBlockHistory,
+}
+
+// IsHomepageBlock 判断 key 是否是已知的内容块
+func IsHomepageBlock(key string) bool {
+	return slices.Contains(homepageBlockKeys, key)
+}
+
+// NormalizeHomepageBlocks 规范化服务提交的内容块配置：
+// 只保留已知 key 并去重，按固定顺序输出；列表为空时写成 HomepageBlocksNone，
+// 避免与「空串 = 全部展示」的历史语义冲突。
+func NormalizeHomepageBlocks(raw string) string {
+	enabled := make(map[string]bool, len(homepageBlockKeys))
+	for _, part := range strings.Split(raw, ",") {
+		key := strings.ToLower(strings.TrimSpace(part))
+		if IsHomepageBlock(key) {
+			enabled[key] = true
+		}
+	}
+	keys := make([]string, 0, len(enabled))
+	for _, key := range homepageBlockKeys {
+		if enabled[key] {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return HomepageBlocksNone
+	}
+	return strings.Join(keys, ",")
 }
 
 // NormalizeHTTPMethod 归一化请求方法：空值等价于 GET，未知方法返回 false。
@@ -247,8 +314,11 @@ type ServiceDailyStats struct {
 	// ServiceID 为自增 ID，仅供前端与本地服务列表匹配，不作为 URL 使用
 	ServiceID int64 `json:"serviceId"`
 	// PublicHash 公开访问标识，公开页面用它拼详情页 URL
-	PublicHash string   `json:"publicHash"`
-	Days       [][3]int `json:"days"`
+	PublicHash string `json:"publicHash"`
+	// Days 每天一个四元组 [upCount, downCount, statusCode, maintenanceCount]。
+	// maintenanceCount 是该天内落在维护窗口内的失败探测次数：不计入可用率，
+	// 前端把这些「计划内停机」用蓝色而不是红色展示。
+	Days [][4]int `json:"days"`
 }
 
 // ServiceMonthly 月度 SLA 汇总。
@@ -530,6 +600,9 @@ type ServiceSummary struct {
 	Interval int     `json:"interval"` // probe interval in seconds
 	// CertExpiresAt HTTPS 证书到期时间（RFC3339）；空值表示无证书信息
 	CertExpiresAt string `json:"certExpiresAt,omitempty"`
+	// HomepageBlocks 公开首页「服务详情」要展示的内容块（逗号分隔，见 HomepageBlock*）。
+	// 空串 = 全部展示。
+	HomepageBlocks string `json:"homepageBlocks"`
 }
 type ServiceHistoryResponse struct {
 	Service    Service      `json:"service"`
@@ -545,6 +618,9 @@ type LatencyHeatmapCell struct {
 	Avg      int    `json:"avg"`      // 成功样本的平均延迟（ms）
 	Samples  int    `json:"samples"`  // 参与统计的成功样本数
 	Failures int    `json:"failures"` // 该小时内的失败探测次数
+	// Maintenance 该小时是否落在维护窗口内：是则失败探测用蓝色（计划内停机）
+	// 而不是红色（真实故障）展示。
+	Maintenance bool `json:"maintenance,omitempty"`
 }
 
 // LatencyHeatmapResponse 「日期 × 小时」聚合结果。
@@ -565,6 +641,10 @@ type ServiceDaily struct {
 	UptimeCount   int    `db:"uptime_count" json:"uptimeCount"`
 	DowntimeCount int    `db:"downtime_count" json:"downtimeCount"`
 	TotalLatency  int    `db:"total_latency" json:"totalLatency"`
+	// MaintenanceCount 维护窗口内失败的探测次数。这类失败不属于真实故障，
+	// 因此不计入 DowntimeCount（可用率口径不变），只用于把矩阵里的
+	// 「计划内停机」标成蓝色。
+	MaintenanceCount int `db:"maintenance_count" json:"maintenanceCount"`
 }
 
 // LogEntry 监控日志条目
@@ -615,6 +695,9 @@ type CreateServiceRequest struct {
 	ExpectKeyword string `json:"expectKeyword"`
 	// FolderID 所属服务分组（服务聚合文件夹）。0 / 省略表示未分组。
 	FolderID *int64 `json:"folderId"`
+	// HomepageBlocks 公开首页「服务详情」展示的内容块，逗号分隔（见 HomepageBlock*）。
+	// 省略 / 空串表示全部展示。
+	HomepageBlocks *string `json:"homepageBlocks"`
 }
 type UpdateServiceRequest struct {
 	Name           string `json:"name"`
@@ -640,6 +723,9 @@ type UpdateServiceRequest struct {
 	ExpectKeyword *string `json:"expectKeyword"`
 	// FolderID 所属服务分组。指针语义：不传表示保持原值，传 0 / null 表示取消分组。
 	FolderID *int64 `json:"folderId"`
+	// HomepageBlocks 公开首页「服务详情」展示的内容块。指针语义：不传表示保持原值，
+	// 传空串表示「全部不展示」（规范化后落库为 HomepageBlocksNone）。
+	HomepageBlocks *string `json:"homepageBlocks"`
 }
 type ReorderServicesRequest struct {
 	Services []ReorderItem `json:"services" binding:"required"`

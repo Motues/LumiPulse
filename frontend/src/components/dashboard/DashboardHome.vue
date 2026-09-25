@@ -15,7 +15,7 @@ const { t, formatDateTime } = useI18n()
 
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(true)
-const dailyStats = ref<Map<number, [number, number, number][]>>(new Map())
+const dailyStats = ref<Map<number, [number, number, number, number][]>>(new Map())
 const maintenances = ref<Maintenance[]>([])
 
 /** 事件状态文案，随语言切换 */
@@ -43,7 +43,7 @@ const avgLatency = computed(() => {
   return Math.round(withData.reduce((sum, s) => sum + s.latency, 0) / withData.length)
 })
 
-function getServiceDays(serviceId: number): [number, number, number][] {
+function getServiceDays(serviceId: number): [number, number, number, number][] {
   return dailyStats.value.get(serviceId) || []
 }
 
@@ -68,20 +68,20 @@ async function loadDailyStats() {
   try {
     // 一次批量请求取回所有服务的矩阵数据（原先按服务逐个 await）
     const res = await api.getAdminBatchDailyStats(days)
-    const map = new Map<number, [number, number, number][]>()
+    const map = new Map<number, [number, number, number, number][]>()
     for (const item of res.data.services) {
       map.set(item.serviceId, item.days)
     }
     for (const svc of stats.value.services) {
       if (!map.has(svc.id)) {
-        map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+        map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1, 0] as [number, number, number, number]))
       }
     }
     dailyStats.value = map
   } catch {
-    const map = new Map<number, [number, number, number][]>()
+    const map = new Map<number, [number, number, number, number][]>()
     for (const svc of stats.value.services) {
-      map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+      map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1, 0] as [number, number, number, number]))
     }
     dailyStats.value = map
   }

@@ -81,17 +81,18 @@ func (h *Handler) buildServiceSummaries(c *gin.Context, services []*model.Servic
 			latency = hb.Latency
 		}
 		summaries = append(summaries, model.ServiceSummary{
-			ID:            svc.ID,
-			PublicHash:    svc.PublicHash,
-			FolderID:      svc.FolderID,
-			Name:          svc.Name,
-			Status:        statusOf(svc.ID),
-			URL:           svc.URL,
-			Type:          svc.Type,
-			Uptime:        uptimeMap[svc.ID],
-			Latency:       latency,
-			Interval:      svc.Interval,
-			CertExpiresAt: svc.CertExpiresAt,
+			ID:             svc.ID,
+			PublicHash:     svc.PublicHash,
+			FolderID:       svc.FolderID,
+			Name:           svc.Name,
+			Status:         statusOf(svc.ID),
+			URL:            svc.URL,
+			Type:           svc.Type,
+			Uptime:         uptimeMap[svc.ID],
+			Latency:        latency,
+			Interval:       svc.Interval,
+			CertExpiresAt:  svc.CertExpiresAt,
+			HomepageBlocks: svc.HomepageBlocks,
 		})
 	}
 	return summaries
@@ -551,6 +552,119 @@ func (h *Handler) GetServiceHistory(c *gin.Context) {
 	})
 }
 
+// --- 维护窗口标注 ---
+//
+// 维护期间的失败探测属于「计划内停机」，与真实故障区分开：延迟分桶用状态 2、
+// 热力图格子用 maintenance 标记、每日矩阵用四元组第 4 位表达，
+// 前端统一用蓝色而不是红色渲染。
+
+// cstZone 展示口径统一使用北京时间（与热力图 / 每日矩阵一致）
+var cstZone = time.FixedZone("CST", 8*3600)
+
+// 延迟分桶状态：0=正常、1=故障、-1=无数据。
+// 2 是本项目扩展的「维护窗口内的故障」，前端用蓝色区分计划内停机与真实故障。
+const (
+	latencyStatusNoData             = -1
+	latencyStatusOK                 = 0
+	latencyStatusFailure            = 1
+	latencyStatusMaintenanceFailure = 2
+)
+
+// maintenanceWindow 一个已解析的维护窗口及其受影响服务集合。
+type maintenanceWindow struct {
+	start      time.Time
+	end        time.Time
+	serviceIDs map[int64]bool
+}
+
+// maintenanceTimeLayouts 维护计划起止时间的解析格式。
+// 带时区的写法优先，其余按北京时间墙上时间解析（日期选择器输出的就是这种写法）。
+var maintenanceTimeLayouts = []string{
+	"2006-01-02T15:04:05Z07:00",
+	"2006-01-02 15:04:05Z07:00",
+	"2006-01-02T15:04:05",
+	"2006-01-02T15:04",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+}
+
+// parseMaintenanceTime 解析维护计划的时间。
+// 不带时区的写法统一按 CST 解析：心跳存的是 UTC，若把墙上时间当 UTC 处理，
+// 维护窗口会整体偏移 8 小时，蓝色标注就会落到错误的时段上。
+func parseMaintenanceTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range maintenanceTimeLayouts {
+		if strings.Contains(layout, "Z07:00") {
+			if t, err := time.Parse(layout, raw); err == nil {
+				return t, true
+			}
+			continue
+		}
+		if t, err := time.ParseInLocation(layout, raw, cstZone); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// parseMaintenanceWindows 把维护计划解析成窗口列表。
+// 已取消的维护不参与标注（那些窗口里的故障是真实故障）；起止颠倒的脏数据直接跳过。
+func parseMaintenanceWindows(maintenances []*model.Maintenance) []maintenanceWindow {
+	windows := make([]maintenanceWindow, 0, len(maintenances))
+	for _, m := range maintenances {
+		if m == nil || m.Status == "cancelled" {
+			continue
+		}
+		start, okStart := parseMaintenanceTime(m.ScheduledStart)
+		end, okEnd := parseMaintenanceTime(m.ScheduledEnd)
+		if !okStart || !okEnd || !end.After(start) {
+			continue
+		}
+		ids := make(map[int64]bool)
+		for _, part := range strings.Split(m.AffectedServices, ",") {
+			if id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
+				ids[id] = true
+			}
+		}
+		windows = append(windows, maintenanceWindow{start: start, end: end, serviceIDs: ids})
+	}
+	return windows
+}
+
+// windowsForService 过滤出会影响该服务的维护窗口
+func windowsForService(windows []maintenanceWindow, svcID int64) []maintenanceWindow {
+	result := make([]maintenanceWindow, 0, len(windows))
+	for _, w := range windows {
+		if w.serviceIDs[svcID] {
+			result = append(result, w)
+		}
+	}
+	return result
+}
+
+// serviceMaintenanceWindows 读取并过滤出会影响该服务的维护窗口（含已完成的窗口，
+// 否则历史数据没法回溯标注）。
+func (h *Handler) serviceMaintenanceWindows(c *gin.Context, svcID int64) []maintenanceWindow {
+	maintenances, err := h.Repo.ListMaintenances(c.Request.Context())
+	if err != nil {
+		return nil
+	}
+	return windowsForService(parseMaintenanceWindows(maintenances), svcID)
+}
+
+// overlapsMaintenance 判断时间区间 [start, end) 是否与任一维护窗口相交
+func overlapsMaintenance(windows []maintenanceWindow, start, end time.Time) bool {
+	for _, w := range windows {
+		if start.Before(w.end) && end.After(w.start) {
+			return true
+		}
+	}
+	return false
+}
+
 // aggregateLatency 将心跳按固定时间窗聚合为紧凑的分桶响应。
 // 聚合下沉到 SQLite 完成（GROUP BY），不再把窗口内的原始心跳全部读进内存。
 func (h *Handler) aggregateLatency(c *gin.Context, serviceID int64, days int) model.LatencyResponse {
@@ -564,7 +678,7 @@ func (h *Handler) aggregateLatency(c *gin.Context, serviceID int64, days int) mo
 	latencies := make([]int, totalBuckets)
 	statuses := make([]int, totalBuckets)
 	for i := range statuses {
-		statuses[i] = -1
+		statuses[i] = latencyStatusNoData
 	}
 
 	// SQLite 按 UTC 解析不带时区的时间串，因此这里统一用 UTC 墙上时间传参
@@ -577,9 +691,24 @@ func (h *Handler) aggregateLatency(c *gin.Context, serviceID int64, days int) mo
 			}
 			latencies[b.Bucket] = int(b.AvgLatency)
 			if b.Failures > 0 {
-				statuses[b.Bucket] = 1
+				statuses[b.Bucket] = latencyStatusFailure
 			} else {
-				statuses[b.Bucket] = 0
+				statuses[b.Bucket] = latencyStatusOK
+			}
+		}
+	}
+
+	// 维护窗口内的故障单独标成状态 2：前端用蓝色画这段曲线，
+	// 与「真实故障」的红色区分开。
+	if windows := h.serviceMaintenanceWindows(c, serviceID); len(windows) > 0 {
+		bucketDuration := time.Duration(bucketSize) * time.Minute
+		for i := range statuses {
+			if statuses[i] != latencyStatusFailure {
+				continue
+			}
+			begin := startTime.Add(time.Duration(i) * bucketDuration)
+			if overlapsMaintenance(windows, begin, begin.Add(bucketDuration)) {
+				statuses[i] = latencyStatusMaintenanceFailure
 			}
 		}
 	}
@@ -652,7 +781,7 @@ func (h *Handler) GetServiceLatencyHeatmap(c *gin.Context) {
 	}
 
 	// 以北京时间的「今天 00:00」为终点，向前取 days 天（含今天）
-	loc := time.FixedZone("CST", 8*3600)
+	loc := cstZone
 	now := time.Now().In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	from := today.AddDate(0, 0, -(days - 1))
@@ -664,6 +793,18 @@ func (h *Handler) GetServiceLatencyHeatmap(c *gin.Context) {
 	}
 	if cells == nil {
 		cells = []*model.LatencyHeatmapCell{}
+	}
+
+	// 维护窗口内的小时单独标注：前端把这些小时的失败探测画成蓝色（计划内停机）
+	if windows := h.serviceMaintenanceWindows(c, svc.ID); len(windows) > 0 {
+		for _, cell := range cells {
+			hourStart, err := time.ParseInLocation("2006-01-02", cell.Day, loc)
+			if err != nil {
+				continue
+			}
+			hourStart = hourStart.Add(time.Duration(cell.Hour) * time.Hour)
+			cell.Maintenance = overlapsMaintenance(windows, hourStart, hourStart.Add(time.Hour))
+		}
 	}
 
 	maxAvg := 0
@@ -873,22 +1014,25 @@ func incidentStatusForDate(incidents []*model.Incident, date string) int {
 	return 0
 }
 
-// buildDailyPairs 把每日汇总 + 事件状态整理成 [upCount, downCount, statusCode] 三元组数组。
+// buildDailyPairs 把每日汇总 + 事件状态整理成
+// [upCount, downCount, statusCode, maintenanceCount] 四元组数组。
 // 供单个服务接口与批量接口共用，保证两者输出完全一致。
-func buildDailyPairs(dailies []*model.ServiceDaily, incidents []*model.Incident, days int) [][3]int {
+// maintenanceCount 是维护窗口内的失败探测次数：不计入可用率，
+// 前端把它当作「计划内停机」用蓝色展示。
+func buildDailyPairs(dailies []*model.ServiceDaily, incidents []*model.Incident, days int) [][4]int {
 	dailyMap := make(map[string]*model.ServiceDaily, len(dailies))
 	for _, d := range dailies {
 		dailyMap[d.Date] = d
 	}
 
 	now := time.Now()
-	pairs := make([][3]int, 0, days)
+	pairs := make([][4]int, 0, days)
 	for i := days - 1; i >= 0; i-- {
 		date := now.AddDate(0, 0, -i).Format("2006-01-02")
-		if d, ok := dailyMap[date]; ok && (d.UptimeCount > 0 || d.DowntimeCount > 0) {
-			pairs = append(pairs, [3]int{d.UptimeCount, d.DowntimeCount, incidentStatusForDate(incidents, date)})
+		if d, ok := dailyMap[date]; ok && (d.UptimeCount > 0 || d.DowntimeCount > 0 || d.MaintenanceCount > 0) {
+			pairs = append(pairs, [4]int{d.UptimeCount, d.DowntimeCount, incidentStatusForDate(incidents, date), d.MaintenanceCount})
 		} else {
-			pairs = append(pairs, [3]int{-1, -1, -1})
+			pairs = append(pairs, [4]int{-1, -1, -1, 0})
 		}
 	}
 	return pairs

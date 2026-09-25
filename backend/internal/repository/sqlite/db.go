@@ -260,6 +260,12 @@ func InitSchema(db *sqlx.DB) error {
 		// 分组被删除时服务自动变回未分组，不会跟着一起消失。
 		`ALTER TABLE Service ADD COLUMN folder_id INTEGER DEFAULT NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_service_folder ON Service(folder_id)`,
+		// 公开首页「服务详情」要展示哪些内容块（逗号分隔，见 model.HomepageBlock*）。
+		// 空串是历史数据的默认值，语义为「全部展示」；「全部不展示」用 'none' 显式表示。
+		`ALTER TABLE Service ADD COLUMN homepage_blocks TEXT DEFAULT ''`,
+		// 维护窗口内失败的探测次数：不计入可用率（downtime_count 只统计窗口外的失败），
+		// 但前端矩阵用它把「计划内停机」标成蓝色而不是红色。
+		`ALTER TABLE ServiceDaily ADD COLUMN maintenance_count INTEGER DEFAULT 0`,
 	}
 	for _, m := range migrations {
 		db.Exec(m) // ignore errors (column may already exist)

@@ -33,18 +33,30 @@ const plotBottom = padT + plotH
 // 每个组件实例独立的渐变 ID，避免同一页面多个图表互相覆盖
 const uid = `lat-${Math.random().toString(36).slice(2, 8)}`
 
-// 状态：-1=无数据，0=正常，1=故障
-const LINE_COLORS: Record<number, string> = { 0: '#34a761', 1: '#df2d2a', '-1': '#9ca3af' }
+// 状态：-1=无数据，0=正常，1=故障，2=维护窗口内的故障（计划内停机，用蓝色区分）
+const LINE_COLORS: Record<number, string> = {
+  0: '#34a761',
+  1: '#df2d2a',
+  2: 'var(--maintenance-color, #3b82f6)',
+  '-1': '#9ca3af',
+}
+/** 维护中故障的图例/渐变兜底色（SVG 渐变里用固定色值） */
+const MAINTENANCE_FALLBACK = '#3b82f6'
 /** 状态文案走 i18n，切换语言时随模板一起更新 */
 function statusLabel(status: number): string {
   if (status === 0) return t('chart.normal')
+  if (status === 2) return t('chart.maintenanceFailure')
   if (status === 1) return t('chart.failure')
   return t('chart.noData')
 }
 const GRADIENT_STOPS: { status: number; color: string }[] = [
   { status: 0, color: '#34a761' },
   { status: 1, color: '#df2d2a' },
+  { status: 2, color: MAINTENANCE_FALLBACK },
 ]
+
+/** 数据里出现过维护窗口内的故障时才展示对应图例 */
+const hasMaintenanceFailure = computed(() => props.statuses.some(s => s === 2))
 
 interface Pt { x: number; y: number }
 
@@ -352,8 +364,12 @@ function onMouseMove(e: MouseEvent) {
       </svg>
     </div>
 
-    <div class="flex items-center justify-center gap-4 mt-3 text-xs" style="color: var(--text-color); opacity: 0.45;">
+    <div class="flex items-center justify-center gap-4 mt-3 text-xs flex-wrap" style="color: var(--text-color); opacity: 0.45;">
       <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-[#34a761]"></span>{{ t('chart.normal') }}</span>
+      <span
+        v-if="hasMaintenanceFailure"
+        class="flex items-center gap-1.5"
+      ><span class="inline-block w-2.5 h-1 rounded-full" :style="{ backgroundColor: 'var(--maintenance-color, #3b82f6)' }"></span>{{ t('chart.maintenanceFailure') }}</span>
       <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-[#df2d2a]"></span>{{ t('chart.failure') }}</span>
       <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-1 rounded-full bg-gray-400"></span>{{ t('chart.noData') }}</span>
     </div>

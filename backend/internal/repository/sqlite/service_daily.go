@@ -29,8 +29,8 @@ func (r *repo) GetOrCreateServiceDaily(ctx context.Context, serviceID int64, dat
 
 func (r *repo) UpdateServiceDaily(ctx context.Context, d *model.ServiceDaily) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE ServiceDaily SET uptime_count=?, downtime_count=?, total_latency=? WHERE id=?",
-		d.UptimeCount, d.DowntimeCount, d.TotalLatency, d.ID)
+		"UPDATE ServiceDaily SET uptime_count=?, downtime_count=?, total_latency=?, maintenance_count=? WHERE id=?",
+		d.UptimeCount, d.DowntimeCount, d.TotalLatency, d.MaintenanceCount, d.ID)
 	return err
 }
 

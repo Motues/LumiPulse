@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { SummaryResponse, Incident, ServiceSummary, FolderSummary } from '../api/types'
 import ServiceMatrix from '../components/ServiceMatrix.vue'
+import ServiceStatusBadge from '../components/ServiceStatusBadge.vue'
+import ServiceUrlBadge from '../components/ServiceUrlBadge.vue'
 import PublicServiceDetail from '../components/PublicServiceDetail.vue'
 import PublicHeader from '../components/PublicHeader.vue'
 import PublicFooter from '../components/PublicFooter.vue'
@@ -18,21 +20,6 @@ const incidents = ref<Incident[]>([])
 const loading = ref(true)
 const error = ref('')
 const showSubscribeModal = ref(false)
-
-const statusColors: Record<string, string> = {
-  operational: '#34a761',
-  degraded: '#fda305',
-  outage: '#df2d2a',
-}
-
-function statusText(status: string): string {
-  switch (status) {
-    case 'operational': return t('status.operational')
-    case 'degraded': return t('status.degraded')
-    case 'outage': return t('status.outage')
-    default: return status
-  }
-}
 
 function incidentStatusLabel(status: string): string {
   const key = `incident.status.${status}`
@@ -49,13 +36,8 @@ function isServiceInMaintenance(serviceId: number): boolean {
   )
 }
 
-function openUrl(url: string) {
-  window.open(url, '_blank')
-}
-
-const dailyStats = ref<Map<number, [number, number, number][]>>(new Map())
+const dailyStats = ref<Map<number, [number, number, number, number][]>>(new Map())
 const isMobile = ref(false)
-const hoveredSvcId = ref<number | null>(null)
 
 // 当前路由中的服务 hash（/services/:hash），用于支持可分享的详情链接
 const selectedHash = computed(() =>
@@ -83,32 +65,37 @@ function closeService() {
   router.push('/')
 }
 
-function getServiceDays(serviceId: number): [number, number, number][] {
+function getServiceDays(serviceId: number): [number, number, number, number][] {
   return dailyStats.value.get(serviceId) || []
 }
 
 /**
- * 服务分组的融合矩阵：把分组内各服务的每日 [up, down, statusCode] 逐日相加。
+ * 服务分组的融合矩阵：把分组内各服务的每日
+ * [up, down, statusCode, maintenanceCount] 逐日相加。
  * 融合口径与后端一致（按探测次数加权）；事件状态取分组内任一服务的状态码，
  * 因为事件本身就是挂在服务上的，这里只用于格子提示。
+ * 维护期失败次数同样相加：只要分组当天有窗口外的真实故障就按真实故障显示，
+ * 否则才用蓝色表达「当天只有计划内停机」。
  */
-function getFolderDays(folder: FolderSummary): [number, number, number][] {
+function getFolderDays(folder: FolderSummary): [number, number, number, number][] {
   const days = (dailyStats.value.get(folder.services[0]?.id ?? -1) || []).length
   if (days === 0) return []
-  const merged: [number, number, number][] = []
+  const merged: [number, number, number, number][] = []
   for (let i = 0; i < days; i++) {
     let up = 0
     let down = 0
     let status = -1
+    let maintenance = 0
     for (const svc of folder.services) {
       const pair = dailyStats.value.get(svc.id)?.[i]
       if (!pair) continue
       if (pair[0] >= 0) up += pair[0]
       if (pair[1] >= 0) down += pair[1]
+      if (pair[3] > 0) maintenance += pair[3]
       if (pair[2] > status) status = pair[2]
     }
     // 分组整体没有任何探测数据时保持「无数据」
-    merged.push(up + down === 0 ? [-1, -1, status] : [up, down, status])
+    merged.push(up + down === 0 && maintenance === 0 ? [-1, -1, status, 0] : [up, down, status, maintenance])
   }
   return merged
 }
@@ -191,20 +178,20 @@ async function loadDailyStats() {
   try {
     // 一次批量请求取回所有服务的矩阵数据（原先按服务逐个 await，N 个服务 = N 次串行往返）
     const res = await api.getBatchDailyStats(days)
-    const map = new Map<number, [number, number, number][]>()
+    const map = new Map<number, [number, number, number, number][]>()
     for (const item of res.data.services) {
       map.set(item.serviceId, item.days)
     }
     for (const svc of summary.value.services) {
       if (!map.has(svc.id)) {
-        map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+        map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1, 0] as [number, number, number, number]))
       }
     }
     dailyStats.value = map
   } catch {
-    const map = new Map<number, [number, number, number][]>()
+    const map = new Map<number, [number, number, number, number][]>()
     for (const svc of summary.value.services) {
-      map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1] as [number, number, number]))
+      map.set(svc.id, Array.from({ length: days }, () => [-1, -1, -1, 0] as [number, number, number, number]))
     }
     dailyStats.value = map
   }
@@ -314,7 +301,7 @@ onUnmounted(() => {
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center gap-1.5 min-w-0">
                 <button
-                  class="p-0.5 flex-shrink-0 transition-transform text-[color:var(--text-color)] opacity-50 hover:opacity-100"
+                  class="p-0.5 flex-shrink-0 transition-transform duration-300 text-[color:var(--text-color)] opacity-50 hover:opacity-100"
                   :class="isFolderExpanded(entry.folder.id) ? 'rotate-90' : ''"
                   :title="isFolderExpanded(entry.folder.id) ? t('home.folderCollapse') : t('home.folderExpand')"
                   @click="toggleFolder(entry.folder.id)"
@@ -331,49 +318,44 @@ onUnmounted(() => {
                   {{ t('home.folderServiceCount', { n: entry.folder.services.length }) }}
                 </span>
               </div>
-              <!-- 融合信息：展开后隐藏 -->
-              <div
-                v-if="!isFolderExpanded(entry.folder.id)"
-                class="flex items-center gap-1.5 text-sm font-medium"
-                :class="{
-                  'text-[#45ba65] dark:text-[#4ade80]': entry.folder.status === 'operational' && !isFolderInMaintenance(entry.folder),
-                  'text-[#f9ac05] dark:text-[#fbbf24]': entry.folder.status === 'degraded',
-                  'text-[#df2d2a] dark:text-[#f87171]': entry.folder.status === 'outage',
-                  'text-gray-400 dark:text-gray-500': isFolderInMaintenance(entry.folder),
-                }"
-              >
-                <div v-if="isFolderInMaintenance(entry.folder)" class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500"></div>
-                <div v-else class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[entry.folder.status] }"></div>
-                {{ isFolderInMaintenance(entry.folder) ? t('status.maintenance') : statusText(entry.folder.status) }}
+              <!-- 融合信息：展开后随收起动画消失 -->
+              <ServiceStatusBadge
+                :status="entry.folder.status"
+                :maintenance="isFolderInMaintenance(entry.folder)"
+                class="flex-shrink-0 transition-opacity duration-200"
+                :class="{ 'opacity-0': isFolderExpanded(entry.folder.id) }"
+              />
+            </div>
+
+            <!-- 融合矩阵：展开时平滑收起 -->
+            <div class="collapse-panel" :class="{ 'is-collapsed': isFolderExpanded(entry.folder.id) }">
+              <div class="min-h-0 overflow-hidden">
+                <ServiceMatrix
+                  :days="getFolderDays(entry.folder)"
+                  :uptime="entry.folder.uptime"
+                />
               </div>
             </div>
-            <ServiceMatrix
-              v-if="!isFolderExpanded(entry.folder.id)"
-              :days="getFolderDays(entry.folder)"
-              :uptime="entry.folder.uptime"
-            />
 
-            <!-- 展开：各服务明细（融合信息消失） -->
-            <div v-else class="space-y-4">
-              <div v-for="svc in entry.folder.services" :key="svc.id">
-                <div class="flex items-center justify-between mb-2">
-                  <span
-                    class="font-medium leading-none cursor-pointer text-[color:var(--text-color)] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
-                    :title="t('home.viewServiceDetail')"
-                    @click="openService(svc)"
-                  >{{ svc.name }}</span>
-                  <div class="flex items-center gap-1.5 text-sm font-medium" :class="{
-                    'text-[#45ba65] dark:text-[#4ade80]': svc.status === 'operational' && !isServiceInMaintenance(svc.id),
-                    'text-[#f9ac05] dark:text-[#fbbf24]': svc.status === 'degraded',
-                    'text-[#df2d2a] dark:text-[#f87171]': svc.status === 'outage',
-                    'text-gray-400 dark:text-gray-500': isServiceInMaintenance(svc.id),
-                  }">
-                    <div v-if="isServiceInMaintenance(svc.id)" class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500"></div>
-                    <div v-else class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[svc.status] }"></div>
-                    {{ isServiceInMaintenance(svc.id) ? t('status.maintenance') : statusText(svc.status) }}
+            <!-- 展开：各服务明细（融合信息消失），收起时平滑折叠 -->
+            <div class="collapse-panel" :class="{ 'is-collapsed': !isFolderExpanded(entry.folder.id) }">
+              <div class="min-h-0 overflow-hidden">
+                <div class="space-y-4 pt-1">
+                  <div v-for="svc in entry.folder.services" :key="svc.id">
+                    <div class="flex items-center justify-between mb-2">
+                      <div class="flex items-center min-w-0">
+                        <span
+                          class="font-medium leading-none cursor-pointer truncate text-[color:var(--text-color)] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                          :title="t('home.viewServiceDetail')"
+                          @click="openService(svc)"
+                        >{{ svc.name }}</span>
+                        <ServiceUrlBadge :url="svc.url" />
+                      </div>
+                      <ServiceStatusBadge :status="svc.status" :maintenance="isServiceInMaintenance(svc.id)" class="flex-shrink-0" />
+                    </div>
+                    <ServiceMatrix :days="getServiceDays(svc.id)" :uptime="svc.uptime" :service-id="svc.id" :incidents-by-date="incidentsByDate" />
                   </div>
                 </div>
-                <ServiceMatrix :days="getServiceDays(svc.id)" :uptime="svc.uptime" :service-id="svc.id" :incidents-by-date="incidentsByDate" />
               </div>
             </div>
           </div>
@@ -385,45 +367,15 @@ onUnmounted(() => {
             :class="{ 'pt-4': idx > 0 }"
           >
             <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center">
+              <div class="flex items-center min-w-0">
                 <span
-                  class="font-bold leading-none cursor-pointer text-[color:var(--text-color)] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                  class="font-bold leading-none cursor-pointer truncate text-[color:var(--text-color)] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
                   :title="t('home.viewServiceDetail')"
                   @click="openService(entry.service)"
                 >{{ entry.service.name }}</span>
-                <span
-                  v-if="entry.service.url"
-                  class="relative inline-flex items-center ml-1"
-                  @mouseenter="hoveredSvcId = entry.service.id"
-                  @mouseleave="hoveredSvcId = null"
-                >
-                  <svg
-                    class="w-4 h-4 cursor-pointer transition-colors text-[color:var(--text-color)] opacity-40 hover:text-emerald-500 dark:hover:text-emerald-400"
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"
-                    @click.stop="openUrl(entry.service.url)"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-                  </svg>
-                  <div
-                    v-if="hoveredSvcId === entry.service.id"
-                    class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 text-xs rounded-lg whitespace-nowrap shadow-lg pointer-events-none z-10"
-                    :style="{ backgroundColor: 'var(--button-hover-color)', color: 'var(--text-color)', border: '1px solid var(--button-border-color)' }"
-                  >
-                    {{ entry.service.url }}
-                    <div class="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent" :style="{ borderTopColor: 'var(--button-hover-color)' }" />
-                  </div>
-                </span>
+                <ServiceUrlBadge :url="entry.service.url" />
               </div>
-              <div class="flex items-center gap-1.5 text-sm font-medium" :class="{
-                'text-[#45ba65] dark:text-[#4ade80]': entry.service.status === 'operational' && !isServiceInMaintenance(entry.service.id),
-                'text-[#f9ac05] dark:text-[#fbbf24]': entry.service.status === 'degraded',
-                'text-[#df2d2a] dark:text-[#f87171]': entry.service.status === 'outage',
-                'text-gray-400 dark:text-gray-500': isServiceInMaintenance(entry.service.id),
-              }">
-                <div v-if="isServiceInMaintenance(entry.service.id)" class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500"></div>
-                <div v-else class="w-2 h-2 rounded-full" :style="{ backgroundColor: statusColors[entry.service.status] }"></div>
-                {{ isServiceInMaintenance(entry.service.id) ? t('status.maintenance') : statusText(entry.service.status) }}
-              </div>
+              <ServiceStatusBadge :status="entry.service.status" :maintenance="isServiceInMaintenance(entry.service.id)" class="flex-shrink-0" />
             </div>
             <ServiceMatrix :days="getServiceDays(entry.service.id)" :uptime="entry.service.uptime" :service-id="entry.service.id" :incidents-by-date="incidentsByDate" />
           </div>
@@ -481,6 +433,33 @@ onUnmounted(() => {
   border: 1px solid var(--button-border-color);
   background-color: var(--bg-color);
   transition: background-color 0.2s;
+}
+
+/**
+ * 服务分组展开 / 收起的平滑动画。
+ * 用 grid-template-rows 在 1fr 与 0fr 之间过渡，高度会跟着内容自适应，
+ * 比 max-height 更贴合实际高度（不需要猜一个够大的上限）。
+ * 直接子元素必须 min-height:0 + overflow:hidden，否则 0fr 压不下去。
+ * 提示框等浮层因此统一用 fixed 定位（见 ServiceUrlBadge / ServiceMatrix）。
+ */
+.collapse-panel {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+}
+.collapse-panel.is-collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.collapse-panel > * {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapse-panel {
+    transition: none;
+  }
 }
 .header-btn:hover {
   background-color: var(--button-hover-color);

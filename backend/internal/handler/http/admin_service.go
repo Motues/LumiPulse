@@ -88,6 +88,10 @@ func (h *Handler) CreateService(c *gin.Context) {
 	if req.TimeoutSeconds != nil {
 		svc.TimeoutSeconds = *req.TimeoutSeconds
 	}
+	// 首页展示内容：省略 / 空串按「全部展示」处理（与历史数据语义一致）
+	if req.HomepageBlocks != nil {
+		svc.HomepageBlocks = model.NormalizeHomepageBlocks(*req.HomepageBlocks)
+	}
 
 	if err := h.Repo.CreateService(c.Request.Context(), svc); err != nil {
 		utils.Error("create service failed: %v", err)
@@ -220,6 +224,10 @@ func (h *Handler) UpdateService(c *gin.Context) {
 	}
 	if req.TimeoutSeconds != nil {
 		svc.TimeoutSeconds = *req.TimeoutSeconds
+	}
+	// 首页展示内容：传空串表示「全部不展示」，落库为 none 标记
+	if req.HomepageBlocks != nil {
+		svc.HomepageBlocks = model.NormalizeHomepageBlocks(*req.HomepageBlocks)
 	}
 	svc.SortOrder = req.SortOrder
 

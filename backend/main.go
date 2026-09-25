@@ -23,7 +23,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const Version = "0.1.10"
+const Version = "0.1.11"
 
 // sqliteDSN 构造带 pragma 的 SQLite 连接串。
 // 说明：busy_timeout / foreign_keys 是「每连接」设置，必须写进 DSN 才能对

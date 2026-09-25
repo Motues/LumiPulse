@@ -30,8 +30,11 @@ export interface Service {
   expectKeyword: string
   /** 所属服务分组（服务聚合文件夹）。未返回表示未分组 */
   folderId?: number
-  /** 所属分组名称（管理端列表接口回显用） */
+  /** 所属服务分组名称（管理端列表接口回显用） */
   folderName?: string
+  /** 公开首页「服务详情」要展示的内容块，逗号分隔（见 utils/homepageBlocks.ts）。
+   *  空串 = 全部展示，'none' = 全部不展示；只影响公开页面，管理后台始终展示全部 */
+  homepageBlocks?: string
   createdAt: string
   updatedAt: string
 }
@@ -52,6 +55,9 @@ export interface ServiceSummary {
   showOnHomepage: boolean
   /** HTTPS 证书到期时间（RFC3339）；空值表示无证书信息 */
   certExpiresAt?: string
+  /** 公开首页「服务详情」要展示的内容块，逗号分隔（见 utils/homepageBlocks.ts）。
+   *  空串 = 全部展示，'none' = 全部不展示 */
+  homepageBlocks?: string
 }
 
 /** 服务分组（服务聚合文件夹）：把多个服务聚合成一个首页条目展示 */
@@ -204,6 +210,8 @@ export interface LatencyHeatmapCell {
   samples: number
   /** 该小时内的失败探测次数 */
   failures: number
+  /** 该小时是否落在维护窗口内：是则失败探测用蓝色（计划内停机）展示 */
+  maintenance?: boolean
 }
 
 /** 响应时间热力图响应：只含有数据的格子，前端按 from~to 补齐 */
@@ -258,7 +266,10 @@ export interface ServiceDailyStats {
   serviceId: number
   /** 公开访问标识：公开页面用它拼服务详情 URL */
   publicHash: string
-  days: [number, number, number][]
+  /** 每天一个四元组 [upCount, downCount, statusCode, maintenanceCount]。
+   *  maintenanceCount 是维护窗口内的失败探测次数：不计入可用率，
+   *  矩阵里用蓝色（计划内停机）而不是红色展示 */
+  days: [number, number, number, number][]
 }
 
 /** 批量每日统计接口响应 */

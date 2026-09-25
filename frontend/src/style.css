@@ -8,6 +8,9 @@
   --button-hover-color: #eeeeee;
   --button-border-color: #e2e2e2;
   --matrix-no-data: #eaeaea;
+  /* 维护中 / 计划内停机统一用蓝色，与故障的红色区分开 */
+  --maintenance-color: #3b82f6;
+  --maintenance-soft-color: #60a5fa;
 }
 
 :root.dark {
@@ -16,6 +19,8 @@
   --button-hover-color: #262626;
   --button-border-color: #2e2e2e;
   --matrix-no-data: #1d1d1d;
+  --maintenance-color: #60a5fa;
+  --maintenance-soft-color: #93c5fd;
   color-scheme: dark;
 }
 

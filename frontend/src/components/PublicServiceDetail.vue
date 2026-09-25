@@ -7,10 +7,11 @@ import LatencyChart from './LatencyChart.vue'
 import LatencyHeatmap from './LatencyHeatmap.vue'
 import { useI18n } from '../composables/useI18n'
 import { certLevel, certRemainingDays } from '../utils/cert'
+import { parseHomepageBlocks } from '../utils/homepageBlocks'
 
 const props = defineProps<{
   service: ServiceSummary
-  dailyDays: [number, number, number][]
+  dailyDays: [number, number, number, number][]
 }>()
 
 const emit = defineEmits<{
@@ -18,6 +19,18 @@ const emit = defineEmits<{
 }>()
 
 const { t, formatDateTime } = useI18n()
+
+/**
+ * 展示内容块由管理后台按服务配置（见 utils/homepageBlocks.ts）：
+ * 未配置 = 全部展示，管理后台自身始终展示全部内容。
+ */
+const blocks = computed(() => parseHomepageBlocks(props.service.homepageBlocks))
+const showMetrics = computed(() => blocks.value.has('metrics'))
+const showInterval = computed(() => blocks.value.has('interval'))
+const showCert = computed(() => blocks.value.has('cert'))
+const showLatency = computed(() => blocks.value.has('latency'))
+const showHeatmap = computed(() => blocks.value.has('heatmap'))
+const showHistory = computed(() => blocks.value.has('history'))
 
 const latencies = ref<number[]>([])
 const statuses = ref<number[]>([])
@@ -62,16 +75,25 @@ const certColorClass: Record<string, string> = {
   critical: 'text-[#df2d2a] dark:text-[#f87171]',
 }
 
-/** 图表概览：故障桶数量。延迟统计（平均 / P95 / P99 / 峰值）由后端在窗口内计算。 */
+/** 图表概览：故障桶数量（维护窗口内的故障计入其中）。
+ *  延迟统计（平均 / P95 / P99 / 峰值）由后端在窗口内计算。 */
 const chartStats = computed(() => {
   const vals = latencies.value.filter((_, i) => statuses.value[i] !== -1)
   if (vals.length === 0) return null
   return {
-    failures: statuses.value.filter(s => s === 1).length,
+    failures: statuses.value.filter(s => s === 1 || s === 2).length,
   }
 })
 
 async function loadLatency() {
+  // 关闭延迟曲线时不请求数据，避免无谓的接口往返
+  if (!showLatency.value) {
+    latencies.value = []
+    statuses.value = []
+    stats.value = null
+    loading.value = false
+    return
+  }
   const hash = props.service.publicHash
   if (!hash) {
     latencies.value = []
@@ -99,8 +121,9 @@ async function loadLatency() {
 }
 
 onMounted(loadLatency)
-// 公开接口按 hash 定位，服务对象被刷新替换时重新拉取
-watch(() => props.service.publicHash, loadLatency)
+// 公开接口按 hash 定位，服务对象被刷新替换时重新拉取；
+// 展示开关变化时同样要重新判断是否需要请求
+watch(() => [props.service.publicHash, props.service.homepageBlocks], loadLatency)
 </script>
 
 <template>
@@ -128,20 +151,21 @@ watch(() => props.service.publicHash, loadLatency)
           {{ statusText(service.status) }}
         </div>
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-        <div>
+      <!-- 指标区：在线率 / 响应时间、探测频率、证书到期均可在管理后台按服务关闭 -->
+      <div v-if="showMetrics || showInterval || showCert" class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+        <div v-if="showMetrics">
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.uptime') }}</div>
           <div class="font-medium" :class="service.uptime >= 99.9 ? 'text-emerald-600 dark:text-emerald-400' : ''" :style="service.uptime < 99.9 ? 'color: var(--text-color);' : ''">{{ service.uptime.toFixed(2) }}%</div>
         </div>
-        <div>
+        <div v-if="showMetrics">
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.responseTime') }}</div>
           <div class="font-medium" style="color: var(--text-color);">{{ service.latency }}ms</div>
         </div>
-        <div>
+        <div v-if="showInterval">
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.probeInterval') }}</div>
           <div class="font-medium" style="color: var(--text-color);">{{ service.interval }}s</div>
         </div>
-        <div v-if="cert">
+        <div v-if="showCert && cert">
           <div class="mb-1" style="color: var(--text-color); opacity: 0.4;">{{ t('service.certExpiry') }}</div>
           <div class="font-medium" :class="certColorClass[cert.level]" :style="cert.level === 'ok' ? 'color: var(--text-color);' : ''">
             {{ cert.expiresAt }}
@@ -152,7 +176,7 @@ watch(() => props.service.publicHash, loadLatency)
     </div>
 
     <!-- Latency chart -->
-    <div class="rounded-lg p-6 mb-6" style="border: 1px solid var(--button-border-color);">
+    <div v-if="showLatency" class="rounded-lg p-6 mb-6" style="border: 1px solid var(--button-border-color);">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h3 class="font-bold" style="color: var(--text-color);">{{ t('service.latency24h') }}</h3>
         <div v-if="chartStats" class="flex items-center gap-3 text-xs" style="color: var(--text-color); opacity: 0.55;">
@@ -192,12 +216,12 @@ watch(() => props.service.publicHash, loadLatency)
     </div>
 
     <!-- Response time heatmap -->
-    <div class="rounded-lg p-6 mb-6" style="border: 1px solid var(--button-border-color);">
+    <div v-if="showHeatmap" class="rounded-lg p-6 mb-6" style="border: 1px solid var(--button-border-color);">
       <LatencyHeatmap :service-hash="service.publicHash" :days="7" />
     </div>
 
     <!-- Service history matrix -->
-    <div class="rounded-lg p-6" style="border: 1px solid var(--button-border-color);">
+    <div v-if="showHistory" class="rounded-lg p-6" style="border: 1px solid var(--button-border-color);">
       <h3 class="font-bold mb-4" style="color: var(--text-color);">{{ t('service.history') }}</h3>
       <ServiceMatrix :days="dailyDays" :uptime="service.uptime" />
     </div>

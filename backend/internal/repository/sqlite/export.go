@@ -69,11 +69,11 @@ func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error
 			}
 		}
 		query := `INSERT INTO Service (name, description, url, type, interval, status, is_active, sort_order, show_on_homepage, insecure_skip_verify, timeout_seconds, public_hash,
-					  http_method, http_headers, http_body, expect_status, expect_keyword, folder_id, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+					  http_method, http_headers, http_body, expect_status, expect_keyword, folder_id, homepage_blocks, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		res, err := tx.ExecContext(ctx, query, s.Name, s.Description, s.URL, s.Type, s.Interval,
 			s.Status, s.IsActive, s.SortOrder, s.ShowOnHomepage, s.InsecureSkipVerify, s.TimeoutSeconds, s.PublicHash,
-			s.HTTPMethod, s.HTTPHeaders, s.HTTPBody, s.ExpectStatus, s.ExpectKeyword, s.FolderID, s.CreatedAt, s.UpdatedAt)
+			s.HTTPMethod, s.HTTPHeaders, s.HTTPBody, s.ExpectStatus, s.ExpectKeyword, s.FolderID, s.HomepageBlocks, s.CreatedAt, s.UpdatedAt)
 		if err != nil {
 			return err
 		}
