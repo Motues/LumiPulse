@@ -92,9 +92,12 @@ type HealthChecker struct {
 	secureClient     *http.Client
 	insecureClient   *http.Client
 	states           map[int64]*probeTaskState // key = serviceID
-	mu               sync.Mutex
-	stop             chan struct{}
-	wg               sync.WaitGroup
+	// certAlerts 已渲染但尚未投递的证书到期提醒。同一聚合窗口内多个服务的提醒
+	// 会合并成一封邮件，由调度循环在窗口结束后统一投递（见 queueCertAlert / flushCertAlerts）。
+	certAlerts []pendingCertAlert
+	mu         sync.Mutex
+	stop       chan struct{}
+	wg         sync.WaitGroup
 	// onDataChange 数据变化回调（用于失效公开页缓存）
 	onDataChange func()
 	// onDailyMaintenance 每日任务回调（归档月报后触发，用于发送月报邮件）。
@@ -218,12 +221,17 @@ func (hc *HealthChecker) loop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// 退出前把还压在聚合窗口里的证书提醒发出去，否则 level 已落库、不会再补发
+			hc.flushCertAlerts(true)
 			return
 		case <-hc.stop:
+			hc.flushCertAlerts(true)
 			return
 		case <-ticker.C:
 			hc.checkAll(ctx)
 			hc.reconcileMaintenanceStatus(ctx)
+			// 证书提醒按聚合窗口合并投递：窗口内累积的服务在这里一次性发出
+			hc.flushCertAlerts(false)
 
 			now := time.Now()
 			// 未确认事件的升级扫描：按分钟计的时限，不必每个心跳都查库
@@ -762,7 +770,20 @@ func toCSTString(t time.Time) string {
 const (
 	certWarnDays     = 30
 	certCriticalDays = 7
+	// certAlertBatchWindow 证书到期提醒的聚合窗口。多个服务集中续期时，窗口内
+	// 触发的提醒会合并成一封邮件，避免一次收到十几封内容雷同的信。
+	// 证书提醒本身提前 30 / 7 天，延迟几分钟投递没有任何影响。
+	certAlertBatchWindow = 5 * time.Minute
 )
+
+// pendingCertAlert 已渲染、等待聚合投递的一条证书到期提醒。
+// subject / body 在入队时按当时的模板与语言渲染好，投递时不再重新渲染。
+type pendingCertAlert struct {
+	serviceID int64
+	subject   string
+	body      string
+	queuedAt  time.Time
+}
 
 // certAlertLevel 根据剩余天数给出应处的告警等级（0 / 30 / 7）。
 // 已经过期的证书按最高等级处理（跳过校验时探测仍会成功，必须单独提醒）。
@@ -827,15 +848,16 @@ func (hc *HealthChecker) syncCertExpiry(ctx context.Context, svc *model.Service,
 	if shouldNotify {
 		utils.Info("checker cert alert for service %s: expires %s (%.1f days left, level %d)",
 			svc.Name, value, remainingDays, level)
-		notifyCertExpiring(svc.Name, expires, remainingDays)
+		hc.notifyCertExpiring(svc.ID, svc.Name, expires, remainingDays)
 	}
 }
 
-// notifyCertExpiring 发送证书即将到期的通知（邮件 + webhook）
-func notifyCertExpiring(name string, expires time.Time, remainingDays float64) {
+// notifyCertExpiring 投递一次证书到期提醒。
+// webhook 立即按服务单独推送（事件粒度保持不变），邮件进入聚合缓冲，
+// 与同一窗口内其他服务的提醒合并成一封发送（见 flushCertAlerts）。
+func (hc *HealthChecker) notifyCertExpiring(serviceID int64, name string, expires time.Time, remainingDays float64) {
 	subject, body := certMessage(name, expires, remainingDays)
 
-	sendAlertMail(subject, body)
 	notifyWebhook(utils.WebhookEvent{
 		Event:   utils.WebhookEventCertExpiring,
 		Service: name,
@@ -843,6 +865,72 @@ func notifyCertExpiring(name string, expires time.Time, remainingDays float64) {
 		Time:    expires.UTC().Format(time.RFC3339),
 		Message: body,
 	})
+
+	hc.queueCertAlert(serviceID, subject, body)
+}
+
+// queueCertAlert 把一条证书提醒放入聚合缓冲。
+// 同一服务在窗口内只保留最新一条（例如窗口内先续期、随后又被判定为即将到期），
+// 并保留最早的入队时间，保证窗口一定会到期而不是被反复刷新。
+func (hc *HealthChecker) queueCertAlert(serviceID int64, subject, body string) {
+	hc.mu.Lock()
+	defer hc.mu.Unlock()
+
+	for i := range hc.certAlerts {
+		if hc.certAlerts[i].serviceID == serviceID {
+			hc.certAlerts[i].subject = subject
+			hc.certAlerts[i].body = body
+			return
+		}
+	}
+
+	hc.certAlerts = append(hc.certAlerts, pendingCertAlert{
+		serviceID: serviceID,
+		subject:   subject,
+		body:      body,
+		queuedAt:  time.Now(),
+	})
+	utils.Info("checker queued cert alert for %s (pending: %d)", subject, len(hc.certAlerts))
+}
+
+// flushCertAlerts 投递聚合缓冲里的证书提醒。窗口未到时直接返回；
+// force 为 true（进程退出）时忽略窗口立即发送，避免已经落库的提醒被丢掉。
+// 只有一条时沿用原有的单服务邮件（主题与正文和聚合前完全一致）；
+// 多条时合并成一封：主题是「N 个服务的证书即将到期」的汇总文案，
+// 正文是各服务模板渲染结果的拼接，因此自定义证书模板里保留 {{service}} 才能分辨服务。
+func (hc *HealthChecker) flushCertAlerts(force bool) {
+	hc.mu.Lock()
+	if len(hc.certAlerts) == 0 {
+		hc.mu.Unlock()
+		return
+	}
+	if !force && time.Since(hc.certAlerts[0].queuedAt) < certAlertBatchWindow {
+		hc.mu.Unlock()
+		return
+	}
+	pending := hc.certAlerts
+	hc.certAlerts = nil
+	hc.mu.Unlock()
+
+	if len(pending) > 1 {
+		utils.Info("checker sending combined cert alert for %d services", len(pending))
+	}
+	subject, body := certDigestMessage(pending)
+	sendAlertMail(subject, body)
+}
+
+// certDigestMessage 把一次投递里的证书提醒合成邮件主题与正文。
+// 只有一条时原样返回该服务的主题与正文（与聚合前的单服务邮件完全一致）。
+func certDigestMessage(pending []pendingCertAlert) (subject, body string) {
+	if len(pending) == 1 {
+		return pending[0].subject, pending[0].body
+	}
+
+	bodies := make([]string, 0, len(pending))
+	for _, p := range pending {
+		bodies = append(bodies, p.body)
+	}
+	return i18n.Current().CertExpiringDigestSubject(len(pending)), strings.Join(bodies, "\n\n")
 }
 
 // sendAlertMail 发送告警邮件。未配置收件人时静默跳过，

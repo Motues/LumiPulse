@@ -18,7 +18,7 @@
 
 - **服务监控** — 支持 HTTP、TCP、Ping 三种监控类型，可自定义检查间隔与单次探测超时
 - **HTTP 探测高级匹配** — 可自定义请求方法、请求头与请求体（适配需要鉴权的接口与只接受 POST 的健康检查），并支持**期望状态码**（`200` / `200,301` / `200-299` / `2xx`）与**期望响应关键字**，识别「返回 200 但内容是错误页」的情况；请求头 / 请求体属于敏感信息，后台不回显
-- **HTTPS 证书监控** — 自动记录 HTTPS 服务证书到期时间，剩余不足 30 / 7 天时分级告警
+- **HTTPS 证书监控** — 自动记录 HTTPS 服务证书到期时间，剩余不足 30 / 7 天时分级告警；多个服务同时触发时**合并成一封邮件**发送
 - **实时状态展示** — 公共状态页实时显示所有服务运行状况，含 90 天在线率矩阵、延迟分位数（P95 / P99）与响应时间热力图（移动端自动把一天聚合成 8 个格子）
 - **服务分组（服务聚合）** — 可把多个服务放进同一分组，首页把分组**融合成一个条目**展示（状态取最严重、可用率与延迟按探测次数加权），点击下拉展开可查看分组内各服务明细
 - **首页展示内容可选** — 按服务选择公开状态页要展示哪些内容（在线率 / 响应时间、探测频率、证书到期、延迟曲线、热力图、历史矩阵），管理后台始终展示全部
@@ -43,7 +43,7 @@
 
 ### Docker 部署
 
-LumiPulse 支持 Docker 一键部署，镜像发布在 GitHub Container Registry。
+LumiPulse 支持 Docker 一键部署，镜像同时发布在 Docker Hub 与 GitHub Container Registry。
 
 ```bash
 # 使用 docker-compose（推荐）
@@ -55,7 +55,10 @@ docker run -d \
   --name lumipulse \
   -p 3000:3000 \
   -v momo-data:/app/data \
-  ghcr.io/motues/lumipulse:latest
+  motues/lumipulse:latest
+
+# 内网 / GHCR 加速时可换用 GitHub Container Registry 地址
+# ghcr.io/motues/lumipulse:latest
 ```
 
 启动成功后，访问 `http://localhost:3000` 为公共状态页，`http://localhost:3000/login` 为登录页面，**默认用户和密码均为`lumi`，首次进入需要修改用户名和密码**。

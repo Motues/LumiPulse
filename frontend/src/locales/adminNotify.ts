@@ -141,7 +141,7 @@ export const adminNotifyZh: Record<string, string> = {
 
   // 通知模板
   'admin.template.title': '通知模板',
-  'admin.template.desc': '自定义各类通知的主题与正文，留空即使用内置的中/英文案（跟随服务端 LANG 配置）。邮件与 webhook 共用同一份模板；正文按纯文本处理，换行会保留，变量值会被自动转义。',
+  'admin.template.desc': '自定义各类通知的主题与正文，留空即使用内置的中/英文案（跟随服务端 LANG 配置）。邮件与 webhook 共用同一份模板；正文按纯文本处理，换行会保留，变量值会被自动转义。证书到期提醒的邮件按 5 分钟合并发送：窗口内多个服务同时触发时只发一封，正文是多条模板渲染结果的拼接，主题改用内置汇总文案，因此证书正文里请保留 {{service}}。',
   'admin.template.subjectLabel': '主题',
   'admin.template.bodyLabel': '正文',
   'admin.template.varsLabel': '可用变量：',
@@ -317,7 +317,7 @@ export const adminNotifyEn: Record<string, string> = {
 
   // Notification templates
   'admin.template.title': 'Notification templates',
-  'admin.template.desc': 'Customize the subject and body of each notification. Leave both empty to use the built-in copy (following the server LANG setting). Email and webhook share the same template; the body is treated as plain text, line breaks are preserved and variable values are escaped automatically.',
+  'admin.template.desc': 'Customize the subject and body of each notification. Leave both empty to use the built-in copy (following the server LANG setting). Email and webhook share the same template; the body is treated as plain text, line breaks are preserved and variable values are escaped automatically. Certificate expiry emails are batched over a 5-minute window: when several services fire at once a single email is sent whose body concatenates the rendered templates and whose subject uses a built-in summary, so keep {{service}} in the certificate body.',
   'admin.template.subjectLabel': 'Subject',
   'admin.template.bodyLabel': 'Body',
   'admin.template.varsLabel': 'Available variables:',

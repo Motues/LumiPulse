@@ -1,6 +1,6 @@
 services:
   lumipulse:
-    image: ghcr.io/motues/lumipulse:latest
+    image: motues/lumipulse:latest   # Docker Hub；GHCR 备用地址：ghcr.io/motues/lumipulse:latest
     container_name: lumipulse
     restart: always
     ports:

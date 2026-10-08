@@ -208,6 +208,12 @@ func (l Lang) CertExpired() string {
 	return l.pick("已过期", "expired")
 }
 
+// CertExpiringDigestSubject 多个服务的证书在同一聚合窗口内到期时的汇总主题。
+// 只有单个服务时仍然使用 CertExpiringSubject（可被 tpl_cert_subject 覆盖）。
+func (l Lang) CertExpiringDigestSubject(count int) string {
+	return fmt.Sprintf(l.pick("%d 个服务的证书即将到期", "%d services have certificates expiring"), count)
+}
+
 // --- 邮件与订阅源框架文案 ---
 
 // EmailFooter 邮件页脚
