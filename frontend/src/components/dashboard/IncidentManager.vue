@@ -28,7 +28,8 @@ const mergeSourceId = ref('')
 
 const mergeableIncidents = computed(() => {
   if (!mergeTarget.value) return []
-  return incidents.value.filter(i => i.id !== mergeTarget.value!.id && i.status !== 'resolved')
+  // 子事件已经挂在父事件下，不能再作为合并源（后端也会拒绝）
+  return incidents.value.filter(i => i.id !== mergeTarget.value!.id && i.status !== 'resolved' && !i.parentId)
 })
 
 const mergeOptions = computed(() => {
@@ -38,14 +39,14 @@ const mergeOptions = computed(() => {
   }))
 })
 
-function isMerged(inc: Incident): boolean {
-  const ids = inc.affectedServices ? inc.affectedServices.split(',').filter(Boolean).map(Number) : []
-  return ids.length > 1
-}
-
 function openMerge(inc: Incident) {
   if (inc.status === 'resolved') {
     toast(t('admin.incident.cannotMergeResolved'))
+    return
+  }
+  // 子事件不要再往下嵌套合并
+  if (inc.parentId) {
+    toast(t('admin.incident.cannotMergeChild'))
     return
   }
   mergeTarget.value = inc
@@ -381,7 +382,16 @@ onMounted(() => {
         </thead>
         <tbody class="divide-y">
           <tr v-for="inc in incidents" :key="inc.id" @click="openDetail(inc)" class="cursor-pointer hover:bg-[var(--button-hover-color)]">
-            <td class="px-6 py-4 font-bold" style="color: var(--text-color);">{{ inc.title }}</td>
+            <td class="px-6 py-4 font-bold" style="color: var(--text-color);">
+              {{ inc.title }}
+              <span
+                v-if="inc.parentId"
+                class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium align-middle"
+                style="background-color: var(--button-hover-color); color: var(--text-color); opacity: 0.6;"
+              >
+                {{ t('admin.incident.childBadge', { parent: inc.parentId }) }}
+              </span>
+            </td>
             <td class="px-6 py-4">
               <span :class="['inline-flex items-center px-2 py-1 rounded text-xs font-medium border', impactClass(inc.impact)]">
                 {{ impactLabel[inc.impact] || inc.impact }}

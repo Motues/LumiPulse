@@ -66,6 +66,7 @@ export const adminIncidentZh: Record<string, string> = {
 
   // 子事件 / 时间线
   'admin.incident.childrenTitle': '子事件（{n}）',
+  'admin.incident.childBadge': '子事件 #{parent}',
   'admin.incident.splitOut': '拆分出去',
   'admin.incident.timeline': '事件经过',
   'admin.incident.addUpdate': '添加更新',
@@ -88,6 +89,7 @@ export const adminIncidentZh: Record<string, string> = {
   'admin.incident.mergeHint': '选择要合并至「{title}」的事件',
   'admin.incident.noMergeableIncident': '没有可合并的事件',
   'admin.incident.cannotMergeResolved': '已解决的事件不能合并',
+  'admin.incident.cannotMergeChild': '子事件不能再继续合并',
   'admin.incident.mergeSuccess': '合并成功',
   'admin.incident.mergeFailed': '合并失败',
   'admin.incident.splitSuccess': '拆分成功',
@@ -281,6 +283,7 @@ export const adminIncidentEn: Record<string, string> = {
 
   // Sub-incidents / timeline
   'admin.incident.childrenTitle': 'Sub-incidents ({n})',
+  'admin.incident.childBadge': 'Sub-incident #{parent}',
   'admin.incident.splitOut': 'Split out',
   'admin.incident.timeline': 'Incident timeline',
   'admin.incident.addUpdate': 'Add update',
@@ -303,6 +306,7 @@ export const adminIncidentEn: Record<string, string> = {
   'admin.incident.mergeHint': 'Select the incident to merge into “{title}”',
   'admin.incident.noMergeableIncident': 'No incidents available to merge',
   'admin.incident.cannotMergeResolved': 'Resolved incidents cannot be merged',
+  'admin.incident.cannotMergeChild': 'A sub-incident cannot be merged again',
   'admin.incident.mergeSuccess': 'Merged successfully',
   'admin.incident.mergeFailed': 'Failed to merge',
   'admin.incident.splitSuccess': 'Split successfully',

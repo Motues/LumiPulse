@@ -116,9 +116,16 @@ func (hc *HealthChecker) shouldEscalate(ctx context.Context, inc *model.Incident
 
 	inc.EscalationCount++
 	inc.LastEscalatedAt = now.UTC().Format(time.RFC3339)
-	if err := hc.repo.UpdateIncident(ctx, inc); err != nil {
+	active, err := hc.repo.MarkIncidentEscalated(ctx, inc.ID, inc.EscalationCount, inc.LastEscalatedAt)
+	if err != nil {
 		utils.Info("checker failed to record escalation for incident #%d: %v", inc.ID, err)
 		// 记录失败时依然继续通知：宁可重复一次，也不要静默漏掉升级
+		return true
+	}
+	if !active {
+		// 扫描之后、写回之前事件已被解决（或人工删除），本次升级作废
+		utils.Info("checker skipped escalation for incident #%d (already resolved)", inc.ID)
+		return false
 	}
 	return true
 }
@@ -148,7 +155,7 @@ func (hc *HealthChecker) sendEscalation(ctx context.Context, inc *model.Incident
 		utils.Info("checker suppressed escalation email for incident #%d (quiet hours)", inc.ID)
 		return
 	}
-	sendAlertMail(subject, body)
+	sendServiceAlertMail(inc.ServiceID, subject, body)
 	hc.notifySubscribers(ctx, svc, subject, body)
 }
 

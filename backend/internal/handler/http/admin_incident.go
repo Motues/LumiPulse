@@ -333,7 +333,9 @@ func (h *Handler) AdminListIncidents(c *gin.Context) {
 		limit = 20
 	}
 
-	incidents, total, err := h.Repo.ListIncidents(c.Request.Context(), page, limit)
+	// 管理端列表包含子事件：自动合并后的子事件不会在公开页出现，
+	// 但后台必须能看到，避免"收到告警邮件却找不到事件"。
+	incidents, total, err := h.Repo.ListIncidentsWithChildren(c.Request.Context(), page, limit)
 	if err != nil {
 		utils.Error("list incidents failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to fetch incidents"})
@@ -438,6 +440,10 @@ func (h *Handler) MergeIncident(c *gin.Context) {
 	}
 	if source.ParentID != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Source incident is already a child of another incident"})
+		return
+	}
+	if target.ParentID != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Target incident is a child event and cannot host other incidents"})
 		return
 	}
 

@@ -258,7 +258,7 @@ const reversedUpdates = computed(() => {
         <button @click="openEdit" class="op-btn op-btn-edit p-1.5 rounded-lg" :title="t('admin.incident.edit')">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
-        <button @click="emit('merge', incident)" v-if="incident.status !== 'resolved'" class="op-btn p-1.5 rounded-lg" :title="t('admin.incident.merge')">
+        <button @click="emit('merge', incident)" v-if="incident.status !== 'resolved' && !incident.parentId" class="op-btn p-1.5 rounded-lg" :title="t('admin.incident.merge')">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-3-3m3 3l3-3M4 20h16" /></svg>
         </button>
         <button @click="handleDelete" class="op-btn op-btn-delete p-1.5 rounded-lg" :title="t('admin.incident.delete')">
@@ -270,7 +270,16 @@ const reversedUpdates = computed(() => {
     <!-- Info card -->
     <div class="rounded-xl p-5 mb-6" style="background-color: var(--bg-color); border: 1px solid var(--button-border-color);">
       <div class="flex items-start justify-between mb-3">
-        <h2 class="text-lg font-bold" style="color: var(--text-color);">{{ incident.title }}</h2>
+        <h2 class="text-lg font-bold" style="color: var(--text-color);">
+          {{ incident.title }}
+          <span
+            v-if="incident.parentId"
+            class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium align-middle"
+            style="background-color: var(--button-hover-color); color: var(--text-color); opacity: 0.6;"
+          >
+            {{ t('admin.incident.childBadge', { parent: incident.parentId }) }}
+          </span>
+        </h2>
         <span :class="['inline-flex items-center px-2 py-1 rounded text-xs font-medium border', impactClass(incident.impact)]">
           {{ impactLabel[incident.impact] || incident.impact }}
         </span>

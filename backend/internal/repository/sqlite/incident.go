@@ -77,6 +77,21 @@ func (r *repo) ListIncidents(ctx context.Context, page, limit int) ([]*model.Inc
 	return incidents, total, err
 }
 
+// ListIncidentsWithChildren 管理端列表：根事件与子事件一起返回，按时间倒序。
+// 子事件会带 parent_id，前端据此展示"子事件 #N"角标。
+func (r *repo) ListIncidentsWithChildren(ctx context.Context, page, limit int) ([]*model.Incident, int64, error) {
+	var total int64
+	if err := r.db.GetContext(ctx, &total, "SELECT COUNT(*) FROM Incident"); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	var incidents []*model.Incident
+	query := `SELECT * FROM Incident ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+	err := r.db.SelectContext(ctx, &incidents, query, limit, offset)
+	return incidents, total, err
+}
+
 func (r *repo) ListActiveIncidents(ctx context.Context) ([]*model.Incident, error) {
 	var incidents []*model.Incident
 	query := `SELECT * FROM Incident WHERE status != 'resolved' AND parent_id IS NULL ORDER BY created_at DESC`
@@ -86,7 +101,10 @@ func (r *repo) ListActiveIncidents(ctx context.Context) ([]*model.Incident, erro
 
 func (r *repo) GetActiveIncidentByService(ctx context.Context, serviceID int64) (*model.Incident, error) {
 	var inc model.Incident
-	query := `SELECT * FROM Incident WHERE service_id = ? AND status != 'resolved' ORDER BY created_at DESC LIMIT 1`
+	// 优先返回根事件：子事件已经随父事件解决，个别历史遗留的孤儿子事件
+	// 只有在没有根事件时才会被兜底返回。
+	query := `SELECT * FROM Incident WHERE service_id = ? AND status != 'resolved'
+				  ORDER BY (parent_id IS NULL) DESC, created_at DESC LIMIT 1`
 	err := r.db.GetContext(ctx, &inc, query, serviceID)
 	if err != nil {
 		return nil, err
@@ -159,6 +177,24 @@ func (r *repo) UpdateIncident(ctx context.Context, inc *model.Incident) error {
 		inc.ResolvedAt = nil
 	}
 	return nil
+}
+
+// MarkIncidentEscalated 只写升级计数与时间，避免整行快照覆盖并发修改的状态。
+// 条件里带上 status != 'resolved'：事件已解决时不再升级，也不会被写回 investigating。
+func (r *repo) MarkIncidentEscalated(ctx context.Context, id int64, count int, lastEscalatedAt string) (bool, error) {
+	now := time.Now().Format(time.RFC3339)
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE Incident SET escalation_count = ?, last_escalated_at = ?, updated_at = ?
+		 WHERE id = ? AND status != 'resolved'`,
+		count, lastEscalatedAt, now, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 func (r *repo) DeleteIncident(ctx context.Context, id int64) error {

@@ -55,12 +55,20 @@ type Repository interface {
 	GetIncident(ctx context.Context, id int64) (*model.Incident, error)
 	GetIncidentByHash(ctx context.Context, hash string) (*model.Incident, error)
 	ListIncidents(ctx context.Context, page, limit int) ([]*model.Incident, int64, error)
+	// ListIncidentsWithChildren 管理端事件列表：根事件与子事件都返回。
+	// 自动合并产生的子事件不在公开列表展示，但管理端必须能看到，
+	// 否则会出现"邮件告警了、事件管理里却找不到"的情况。
+	ListIncidentsWithChildren(ctx context.Context, page, limit int) ([]*model.Incident, int64, error)
 	ListActiveIncidents(ctx context.Context) ([]*model.Incident, error)
 	ListServiceIncidents(ctx context.Context, serviceID int64, days int) ([]*model.Incident, error)
 	ListIncidentsSince(ctx context.Context, days int) ([]*model.Incident, error)
 	CountRecentIncidents(ctx context.Context, days int) (total int64, resolved int64, err error)
 	GetActiveIncidentByService(ctx context.Context, serviceID int64) (*model.Incident, error)
 	UpdateIncident(ctx context.Context, inc *model.Incident) error
+	// MarkIncidentEscalated 只更新升级计数与时间，避免用陈旧快照整行覆盖
+	// 状态/父子关系（否则可能把刚刚解决的事件又写回 investigating）。
+	// 返回 false 表示事件已解决，不应再发送升级通知。
+	MarkIncidentEscalated(ctx context.Context, id int64, count int, lastEscalatedAt string) (bool, error)
 	DeleteIncident(ctx context.Context, id int64) error
 
 	// IncidentUpdate
