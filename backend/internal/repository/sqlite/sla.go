@@ -219,7 +219,7 @@ func incidentDowntimeQuery() string {
 // 月份边界按北京时间（UTC+8）切分，与站点展示口径一致。
 func (r *repo) AggregateIncidentDowntime(ctx context.Context, from, toExclusive string) (map[int64]int, error) {
 	// 注意：两个边界必须用同一个时区，否则两者之间的时长会被算错
-	const tz = "+08:00"
+	const tz = slaTZ
 	fromTs := from + "T00:00:00" + tz
 	toTs := toExclusive + "T00:00:00" + tz
 
@@ -234,8 +234,14 @@ func (r *repo) AggregateIncidentDowntime(ctx context.Context, from, toExclusive 
 	return result, nil
 }
 
+// slaTZ 时间窗口的切分时区。Incident 的时间列是带偏移的 RFC3339 文本，
+// 直接按字符串比较会在月份边界上按字典序判断（相当于按 UTC 字面量比较），
+// 与站点展示口径（北京时间）差 8 小时。所有窗口比较统一走 julianday + 同一时区。
+const slaTZ = "+08:00"
+
 // CountIncidentsBetween 统计区间内的事件数量（只统计根事件，不含合并进来的子事件）。
-// 同样需要 RFC3339 格式的时间串。
+// 时间边界按北京时间切分，与 AggregateIncidentDowntime 保持一致：
+// 之前这里用字符串比较 "YYYY-MM-DDT00:00:00Z"，月末最后 8 小时的事件会被算进错误的月份。
 func (r *repo) CountIncidentsBetween(ctx context.Context, from, toExclusive string) (map[int64]int, error) {
 	type row struct {
 		ServiceID int64 `db:"service_id"`
@@ -244,8 +250,11 @@ func (r *repo) CountIncidentsBetween(ctx context.Context, from, toExclusive stri
 	var rows []row
 	err := r.db.SelectContext(ctx, &rows,
 		`SELECT service_id, COUNT(*) AS total FROM Incident
-		 WHERE parent_id IS NULL AND created_at >= ? AND created_at < ?
-		 GROUP BY service_id`, from+"T00:00:00Z", toExclusive+"T00:00:00Z")
+		 WHERE parent_id IS NULL
+		   AND julianday(created_at) >= julianday(?)
+		   AND julianday(created_at) < julianday(?)
+		 GROUP BY service_id`,
+		from+"T00:00:00"+slaTZ, toExclusive+"T00:00:00"+slaTZ)
 	if err != nil {
 		return nil, err
 	}

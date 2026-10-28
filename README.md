@@ -100,6 +100,7 @@ vim ./config/config.yaml
 | `LANG` | `zh-CN` | 服务端生成内容（RSS / Atom 订阅源、告警邮件、月报邮件）的语言，可选 `zh-CN` / `en-US`。前端界面语言可在页面右上角切换，不受该项影响 |
 | `MAX_PROBE_CONCURRENCY` | `8` | 单轮探测的最大并发数，服务数量多时可调大 |
 | `MAINTENANCE_REMIND_MINUTES` | `30` | 维护计划开始前的提前提醒量（分钟），`0` 表示关闭提醒 |
+| `TRUSTED_PROXIES` | 空 | 可信反向代理的 IP / CIDR 列表（逗号分隔），例如 `127.0.0.1,172.16.0.0/12`。留空表示采信任意来源的 `X-Forwarded-For` 等转发头；部署在 nginx / Cloudflare 后面时建议填上代理网段，否则客户端可以伪造来源 IP 绕过登录失败封禁，审计日志里的 IP 也不可信 |
 
 启动成功后，访问 `http://localhost:3000` 为公共状态页，`http://localhost:3000/login` 为登录页面，**默认用户和密码均为`lumi`，首次进入需要修改用户名和密码**。
 

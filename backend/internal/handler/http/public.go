@@ -317,6 +317,9 @@ func (h *Handler) Subscribe(c *gin.Context) {
 		return
 	}
 
+	// 归一化后再查询/写入：签名与去重都按小写邮箱计算
+	email := normalizeSubscriberEmail(req.Email)
+
 	// Convert services to comma-separated string
 	servicesStr := ""
 	if len(req.Services) > 0 {
@@ -328,16 +331,16 @@ func (h *Handler) Subscribe(c *gin.Context) {
 	}
 
 	// Check if already subscribed
-	if existing, err := h.Repo.GetSubscriberByEmail(c.Request.Context(), req.Email); err == nil && existing != nil {
+	if existing, err := h.Repo.GetSubscriberByEmail(c.Request.Context(), email); err == nil && existing != nil {
 		// Update services if already subscribed
 		if existing.SubscribedServices != servicesStr {
-			_ = h.Repo.UpdateSubscriberServices(c.Request.Context(), req.Email, servicesStr)
+			_ = h.Repo.UpdateSubscriberServices(c.Request.Context(), email, servicesStr)
 		}
 		c.JSON(http.StatusOK, model.APIResponse{Code: 200, Message: "该邮箱已订阅"})
 		return
 	}
 
-	if _, err := h.Repo.CreateSubscriber(c.Request.Context(), req.Email, servicesStr); err != nil {
+	if _, err := h.Repo.CreateSubscriber(c.Request.Context(), email, servicesStr); err != nil {
 		c.JSON(http.StatusInternalServerError, model.APIResponse{Code: 500, Message: "订阅失败，请稍后重试"})
 		return
 	}

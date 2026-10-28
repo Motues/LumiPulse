@@ -10,6 +10,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// validateMaintenanceWindow 校验维护窗口：时间必须可解析，且结束时间晚于开始时间。
+//
+// 不校验的话，脏数据会一路写进库：检查器的 parseTime 解析失败时会退回「当前时间」，
+// 维护计划会莫名其妙立刻进入 in_progress（或永远停在 completed），
+// 而维护窗口内的失败又不会计入可用率，等于把真实故障藏了起来。
+func validateMaintenanceWindow(m *model.Maintenance) string {
+	start, ok := parseMaintenanceTime(m.ScheduledStart)
+	if !ok {
+		return "维护开始时间格式无效"
+	}
+	end, ok := parseMaintenanceTime(m.ScheduledEnd)
+	if !ok {
+		return "维护结束时间格式无效"
+	}
+	if !end.After(start) {
+		return "维护结束时间必须晚于开始时间"
+	}
+	return ""
+}
+
 // validateRecurrence 校验并规范化周期维护参数。返回空字符串表示通过。
 // recurrence 为空即一次性维护窗口，其余字段会被清空以免残留脏数据。
 func validateRecurrence(m *model.Maintenance) string {
@@ -85,6 +105,10 @@ func (h *Handler) CreateMaintenance(c *gin.Context) {
 		RecurrenceUntil:    req.RecurrenceUntil,
 	}
 	if msg := validateRecurrence(m); msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": msg})
+		return
+	}
+	if msg := validateMaintenanceWindow(m); msg != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": msg})
 		return
 	}
@@ -164,6 +188,10 @@ func (h *Handler) UpdateMaintenance(c *gin.Context) {
 		m.RecurrenceUntil = *req.RecurrenceUntil
 	}
 	if msg := validateRecurrence(m); msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": msg})
+		return
+	}
+	if msg := validateMaintenanceWindow(m); msg != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": msg})
 		return
 	}

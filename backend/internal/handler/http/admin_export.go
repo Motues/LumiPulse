@@ -130,6 +130,10 @@ func (h *Handler) AdminImport(c *gin.Context) {
 		return
 	}
 
+	// 探测任务不随导出文件走：导入时按默认阈值重建，服务器归属需要重新指定
+	utils.Info("data imported: %d services (probe tasks rebuilt, server assignment cleared), %d incidents, %d maintenances",
+		len(data.Services), len(data.Incidents), len(data.Maintenances))
+
 	// Import settings
 	for key, value := range data.Settings {
 		_ = utils.SetSetting(key, value)

@@ -25,6 +25,13 @@ type subscriptionView struct {
 	SiteName string  `json:"siteName"`
 }
 
+// normalizeSubscriberEmail 统一邮箱大小写与空白。
+// 退订令牌按归一化后的邮箱计算（见 utils.SignUnsubscribe），查询与写入也必须用
+// 同一口径，否则同一个地址会因为大小写不同产生两条订阅、收到两封通知。
+func normalizeSubscriberEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
 // parseSubscribedServices 把逗号分隔的服务 ID 串解析成数组
 func parseSubscribedServices(raw string) []int64 {
 	result := make([]int64, 0)

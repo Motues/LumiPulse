@@ -40,14 +40,18 @@ func (r *repo) DeleteSubscriber(ctx context.Context, id int64) error {
 	return err
 }
 
+// GetSubscriberByEmail 按邮箱取订阅记录。
+// 用 LOWER 比较：历史数据里可能存着大小写混写的邮箱，而退订签名与写入
+// 都按小写归一化，精确匹配会漏掉老记录，进而重复插入同一个人。
 func (r *repo) GetSubscriberByEmail(ctx context.Context, email string) (*model.Subscriber, error) {
 	var s model.Subscriber
-	err := r.db.GetContext(ctx, &s, "SELECT * FROM Subscriber WHERE email = ?", email)
+	err := r.db.GetContext(ctx, &s, "SELECT * FROM Subscriber WHERE LOWER(email) = LOWER(?)", email)
 	return &s, err
 }
 
+// UpdateSubscriberServices 按邮箱更新订阅偏好（同样按归一化后的邮箱匹配）
 func (r *repo) UpdateSubscriberServices(ctx context.Context, email string, services string) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	_, err := r.db.ExecContext(ctx, "UPDATE Subscriber SET subscribed_services=?, updated_at=? WHERE email=?", services, now, email)
+	_, err := r.db.ExecContext(ctx, "UPDATE Subscriber SET subscribed_services=?, updated_at=? WHERE LOWER(email) = LOWER(?)", services, now, email)
 	return err
 }

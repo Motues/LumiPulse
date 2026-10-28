@@ -3,6 +3,7 @@ package checker
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -438,10 +439,12 @@ func (hc *HealthChecker) trackProbeState(ctx context.Context, svc *model.Service
 		incID := st.autoIncidentID
 		hc.mu.Unlock()
 
-		// 绑定的事件可能已被人工解决/删除。定期校验一次并解除绑定，
-		// 否则服务一直故障、事件列表里却永远没有活跃事件。
-		// 采用「每 resolveAfterSuccesses 次失败校验一次」节流，避免每次探测都查库。
-		if incID != 0 && failCount%resolveAfterSuccesses == 0 && !hc.incidentIsActive(ctx, incID) {
+		// 绑定的事件可能已被人工解决/删除。校验并解除绑定，否则服务一直故障、
+		// 事件列表里却永远没有活跃事件。
+		// 一次故障开始时（failCount == 1）先校验一次：人工解决/删除通常发生在
+		// 服务已恢复的那段时间，随后第一次失败就能立刻重新建事件，而不是再等
+		// resolveAfterSuccesses 次失败。故障持续期间则按该阈值节流，避免每次探测都查库。
+		if incID != 0 && (failCount == 1 || failCount%resolveAfterSuccesses == 0) && !hc.incidentIsActive(ctx, incID) {
 			staleID := incID
 			hc.mu.Lock()
 			if st.autoIncidentID == staleID {
@@ -554,24 +557,48 @@ func (hc *HealthChecker) tryResolveIncident(ctx context.Context, svc *model.Serv
 
 	// If merged incident with multiple services, check if ALL are recovered
 	if len(affectedIDs) > 1 {
-		allRecovered := true
-		for _, svcID := range affectedIDs {
-			hc.mu.Lock()
-			st, ok := hc.states[svcID]
-			if ok && st.consecutiveSuccesses < resolveAfterSuccesses {
-				allRecovered = false
-			}
-			hc.mu.Unlock()
-			if !allRecovered {
-				break
-			}
-		}
-		if !allRecovered {
+		if !hc.allServicesRecovered(ctx, affectedIDs) {
 			return // Not all services recovered yet
 		}
 	}
 
 	hc.resolveIncident(ctx, svc, inc)
+}
+
+// allServicesRecovered 判断合并事件里的所有服务是否都已连续成功到恢复阈值。
+//
+// 内存里没有探测状态（进程刚重启）的服务不能直接当成「已恢复」：
+// 另一台服务其实还在故障，只是还没轮到探测，那样会提前判定恢复并发出
+// 一封假的恢复邮件。只有该服务已经不再被探测（停用 / 探测任务被删除）时，
+// 才认为它不参与本次恢复判定。
+func (hc *HealthChecker) allServicesRecovered(ctx context.Context, serviceIDs []int64) bool {
+	for _, svcID := range serviceIDs {
+		hc.mu.Lock()
+		st, ok := hc.states[svcID]
+		recovered := ok && st.consecutiveSuccesses >= resolveAfterSuccesses
+		hc.mu.Unlock()
+
+		if recovered {
+			continue
+		}
+		if ok {
+			return false // 有状态但还没连续成功够次数
+		}
+		if hc.isProbeable(ctx, svcID) {
+			return false // 还在被探测，只是本进程还没探到它
+		}
+	}
+	return true
+}
+
+// isProbeable 判断服务当前是否仍在被探测（服务与探测任务都处于启用状态）。
+func (hc *HealthChecker) isProbeable(ctx context.Context, serviceID int64) bool {
+	svc, err := hc.repo.GetService(ctx, serviceID)
+	if err != nil || svc == nil || !svc.IsActive {
+		return false
+	}
+	task, err := hc.repo.GetProbeTaskByService(ctx, serviceID)
+	return err == nil && task != nil && task.IsActive
 }
 
 // forgetIncidentID 只在服务当前绑定的正是 incID 时解除绑定，避免误清其他事件。
@@ -657,11 +684,13 @@ func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service
 	}
 
 	// 恢复所有受影响服务（合并事件的 affected_services 可能包含多个服务）。
+	// 触发解决的服务本身也一定要恢复：历史数据的 affected_services 可能漏了服务。
 	affectedIDs := incidentServiceIDs(fresh)
 	restoreIDs := append([]int64{}, affectedIDs...)
 	for _, child := range children {
 		restoreIDs = appendIfMissing(restoreIDs, child.ServiceID)
 	}
+	restoreIDs = appendIfMissing(restoreIDs, svc.ID)
 	for _, svcID := range restoreIDs {
 		if s, err := hc.repo.GetService(ctx, svcID); err == nil {
 			s.Status = "operational"
@@ -699,7 +728,9 @@ func (hc *HealthChecker) resolveIncident(ctx context.Context, svc *model.Service
 	if downtimeSeconds < 0 {
 		downtimeSeconds = 0
 	}
-	hc.notifyResolved(ctx, svc, downtimeSeconds)
+	// 通知范围用「事件覆盖的全部服务」而不是触发解决的那一个：
+	// 合并事件的邮件与订阅者都不应该只绑在最后恢复的那个服务上。
+	hc.notifyResolved(ctx, svc, downtimeSeconds, restoreIDs)
 }
 
 func (hc *HealthChecker) createIncident(ctx context.Context, svc *model.Service, task *model.ProbeTask, st *probeTaskState) {
@@ -836,36 +867,30 @@ func withinMergeWindow(a, b *model.Incident) bool {
 }
 
 // mergeIncidents 将 source 作为子事件合并到 target。
-// 调用方必须持有 hc.incidentMu；函数内部会再做一次单向校验，确保不会出现
-// A→B 与 B→A 同时成立（循环父子）的情况。
+// 调用方必须持有 hc.incidentMu。
+//
+// 真正的写入走仓储层的事务实现（MergeIncidents）：条件更新 + 子树重挂 +
+// 受影响服务取并集都在同一个事务里完成。这里以前是「读快照 → 整行 UPDATE」，
+// 与人工合并并发时会用陈旧快照覆盖 affected_services（丢服务），
+// 也可能把 source 挂到一个刚被别人合并掉的父事件下（多级父子）。
 func (hc *HealthChecker) mergeIncidents(ctx context.Context, target, source *model.Incident) {
-	if target.ID == source.ID || target.ParentID != nil || source.ParentID != nil {
+	if target.ID == source.ID {
 		return
 	}
 
-	// Set source as child of target
-	source.ParentID = &target.ID
-	if err := hc.repo.UpdateIncident(ctx, source); err != nil {
-		utils.Info("checker merge incident #%d failed: %v", source.ID, err)
+	if err := hc.repo.MergeIncidents(ctx, target.ID, source.ID); err != nil {
+		if !errors.Is(err, repository.ErrIncidentConflict) {
+			utils.Info("checker merge incident #%d into #%d failed: %v", source.ID, target.ID, err)
+		}
 		return
 	}
 
-	// Merge affected services into target for status tracking.
-	// affected_services 为空的历史事件按 service_id 兜底，否则会"丢服务"并导致
-	// 解决时清不掉内存指针（恢复邮件刷屏的根因）。
-	targetSvcs := incidentServiceIDs(target)
-	sourceSvcs := incidentServiceIDs(source)
-	merged := appendIfMissing(targetSvcs, sourceSvcs...)
-	target.AffectedServices = joinServiceIDs(merged)
-	if err := hc.repo.UpdateIncident(ctx, target); err != nil {
-		// 回滚父子关系，避免留下"子事件建立了、父事件却没记录受影响服务"的半成品。
-		utils.Info("checker merge incident #%d into #%d failed: %v", source.ID, target.ID, err)
-		source.ParentID = nil
-		hc.repo.UpdateIncident(ctx, source)
-		return
+	// 重新读取合并结果：受影响服务以库里的并集为准（内存状态需要指向根事件）
+	merged := target
+	if fresh, err := hc.repo.GetIncident(ctx, target.ID); err == nil {
+		merged = fresh
 	}
 
-	// Add merge notes
 	hc.repo.CreateIncidentUpdate(ctx, &model.IncidentUpdate{
 		IncidentID: target.ID,
 		Status:     "system",
@@ -879,11 +904,11 @@ func (hc *HealthChecker) mergeIncidents(ctx context.Context, target, source *mod
 		IsInternal: true,
 	})
 
-	// Update checker states: source services point to target incident
+	// 受影响服务的运行时状态统一指向根事件，后续探测直接推动根事件解决
 	hc.mu.Lock()
-	for _, svcID := range sourceSvcs {
+	for _, svcID := range incidentServiceIDs(merged) {
 		if st, ok := hc.states[svcID]; ok {
-			st.autoIncidentID = target.ID
+			st.autoIncidentID = merged.ID
 		}
 	}
 	hc.mu.Unlock()
@@ -1235,6 +1260,24 @@ func sendServiceAlertMail(serviceID int64, subject, body string) {
 	}
 }
 
+// sendIncidentAlertMail 事件级邮件投递：受影响服务里任意一个命中「监控服务」
+// 白名单就发一封（只发一封，不是每个服务一封）。
+//
+// 合并事件不能只用 inc.ServiceID 判断：主服务没勾选、但同一次故障里的另一个
+// 服务勾选了时，整封恢复/升级邮件会被静默丢弃，运维只能看到故障通知却收不到恢复。
+// 返回是否真的发出了邮件（未启用 / 全都没命中白名单时返回 false）。
+func sendIncidentAlertMail(serviceIDs []int64, subject, body string) bool {
+	for _, id := range serviceIDs {
+		if allowServiceEmail(id) {
+			if err := utils.SendAlert(subject, body); err != nil {
+				utils.Info("checker send alert failed for incident services %v: %v", serviceIDs, err)
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // notifyAlert 发送服务异常通知。impact 用于判断是否穿透免打扰时段。
 func (hc *HealthChecker) notifyAlert(ctx context.Context, svc *model.Service, ts, impact string) {
 	subject, body := alertMessage(svc, ts)
@@ -1254,7 +1297,7 @@ func (hc *HealthChecker) notifyAlert(ctx context.Context, svc *model.Service, ts
 		return
 	}
 	sendServiceAlertMail(svc.ID, subject, body)
-	hc.notifySubscribers(ctx, svc, subject, body)
+	hc.notifySubscribersFor(ctx, []int64{svc.ID}, subject, body)
 }
 
 // mutedByQuietHours 免打扰时段是否应该拦下这封告警邮件。
@@ -1268,7 +1311,10 @@ func mutedByQuietHours(impact string) bool {
 
 // notifyResolved 发送恢复通知。downtimeSeconds 为本次不可用时长（秒），
 // 0 或负数时正文退回不含时长的文案。恢复邮件同样受免打扰时段影响（webhook 不受影响）。
-func (hc *HealthChecker) notifyResolved(ctx context.Context, svc *model.Service, downtimeSeconds int) {
+//
+// affectedIDs 是事件覆盖的全部服务：合并事件只发一封邮件，但只要其中任意一个
+// 服务在「监控服务」白名单内就应该发出，并且要通知这些服务的全部订阅者。
+func (hc *HealthChecker) notifyResolved(ctx context.Context, svc *model.Service, downtimeSeconds int, affectedIDs []int64) {
 	subject, body := resolvedMessage(svc, downtimeSeconds)
 
 	notifyWebhook(utils.WebhookEvent{
@@ -1282,21 +1328,27 @@ func (hc *HealthChecker) notifyResolved(ctx context.Context, svc *model.Service,
 		utils.Info("checker suppressed recovery email for %s (quiet hours)", svc.Name)
 		return
 	}
-	sendServiceAlertMail(svc.ID, subject, body)
-	hc.notifySubscribers(ctx, svc, subject, body)
+	if !sendIncidentAlertMail(affectedIDs, subject, body) {
+		utils.Info("checker suppressed recovery email for %s (no monitored service matched)", svc.Name)
+	}
+	hc.notifySubscribersFor(ctx, affectedIDs, subject, body)
 }
 
-// notifySubscribers 按订阅偏好把通知投递给公开订阅者。
+// notifySubscribersFor 按订阅偏好把通知投递给公开订阅者。
+// serviceIDs 是本次事件覆盖的服务：订阅了其中任意一个就会收到（每个订阅者只发一封）。
 // 订阅者的 subscribed_services 为空表示订阅全部服务；每封邮件都带退订链接。
 // 投递失败只记录日志，绝不影响探测主流程。
-func (hc *HealthChecker) notifySubscribers(ctx context.Context, svc *model.Service, subject, body string) {
+func (hc *HealthChecker) notifySubscribersFor(ctx context.Context, serviceIDs []int64, subject, body string) {
+	if len(serviceIDs) == 0 {
+		return
+	}
 	subscribers, err := hc.repo.ListSubscribers(ctx)
 	if err != nil {
 		return
 	}
 
 	for _, sub := range subscribers {
-		if !subscriberWantsService(sub, svc.ID) {
+		if !subscriberWantsAny(sub, serviceIDs) {
 			continue
 		}
 		if err := utils.SendSubscriberMail(sub.Email, subject, body); err != nil {
@@ -1319,6 +1371,16 @@ func subscriberWantsService(sub *model.Subscriber, serviceID int64) bool {
 			continue
 		}
 		if id, err := strconv.ParseInt(part, 10, 64); err == nil && id == serviceID {
+			return true
+		}
+	}
+	return false
+}
+
+// subscriberWantsAny 订阅者是否订阅了给定集合里的任意一个服务（合并事件用）。
+func subscriberWantsAny(sub *model.Subscriber, serviceIDs []int64) bool {
+	for _, id := range serviceIDs {
+		if subscriberWantsService(sub, id) {
 			return true
 		}
 	}
@@ -1501,6 +1563,15 @@ func (hc *HealthChecker) cleanup(ctx context.Context) {
 	dailyDays := config.GlobalConfig.DailyRetention()
 	heartbeatDays := config.GlobalConfig.HeartbeatRetention()
 
+	// 修复历史脏数据里的循环父子：旧版本的自动合并可能把两个事件互相挂成子事件，
+	// 之后它们都不再是根事件，列表与仪表盘永远看不到，检查器也解决不掉。
+	if n, err := hc.repo.BreakIncidentCycles(ctx); err != nil {
+		utils.Info("checker repair incident cycles failed: %v", err)
+	} else if n > 0 {
+		utils.Info("checker repaired %d circular incident reference(s)", n)
+		hc.dataChanged()
+	}
+
 	// 必须在删除旧每日明细之前归档：月报要覆盖的时间范围比每日明细的保留窗口更长
 	hc.archiveFinishedMonths(ctx)
 
@@ -1630,12 +1701,4 @@ func appendIfMissing(existing []int64, newIDs ...int64) []int64 {
 		}
 	}
 	return result
-}
-
-func joinServiceIDs(ids []int64) string {
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = strconv.FormatInt(id, 10)
-	}
-	return strings.Join(parts, ",")
 }

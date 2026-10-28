@@ -561,3 +561,98 @@ func TestServiceEmailAllowed(t *testing.T) {
 		}
 	}
 }
+
+// TestRestartDoesNotResolveMergedIncidentEarly 进程重启后内存状态是空的，
+// 此时只有部分服务被重新探测到。合并事件必须等所有受影响服务都恢复才能解决，
+// 否则会发出「还没修好就报告恢复」的假恢复邮件。
+func TestRestartDoesNotResolveMergedIncidentEarly(t *testing.T) {
+	repo, db := testRepo(t)
+	srv := testServer(t, repo, 1)
+	svcA := testService(t, repo, "restart-a.example")
+	svcB := testService(t, repo, "restart-b.example")
+	taskA := testProbeTask(t, repo, svcA.ID, srv.ID, 5)
+	taskB := testProbeTask(t, repo, svcB.ID, srv.ID, 5)
+
+	// 两个服务同时故障 → 自动合并成一个根事件
+	first := New(repo, false, 8)
+	feed(t, first, svcA, taskA, false, 5)
+	feed(t, first, svcB, taskB, false, 5)
+
+	if roots := activeRoots(t, repo); len(roots) != 1 {
+		t.Fatalf("expected 1 active root incident, got %d", len(roots))
+	}
+
+	// 模拟重启：新的检查器，内存里没有任何探测状态
+	second := New(repo, false, 8)
+
+	// 只有 A 恢复，B 还没被探测到
+	feed(t, second, svcA, taskA, true, 5)
+	if roots := activeRoots(t, repo); len(roots) != 1 {
+		t.Fatalf("A 单独恢复不应解决合并事件（B 仍未探测），active roots=%d", len(roots))
+	}
+	if n := countUpdates(t, db, "resolved"); n != 0 {
+		t.Fatalf("A 单独恢复不应发出恢复通知，got %d", n)
+	}
+
+	// B 也恢复后才判定解决，且只发一次
+	feed(t, second, svcB, taskB, true, 5)
+	if roots := activeRoots(t, repo); len(roots) != 0 {
+		t.Fatalf("两个服务都恢复后事件应全部解决，active roots=%d", len(roots))
+	}
+	if n := countUpdates(t, db, "resolved"); n != 1 {
+		t.Fatalf("expected exactly 1 recovery notification, got %d", n)
+	}
+}
+
+// TestManualResolveAllowsImmediateNewIncident 人工解决事件后，服务再次故障时
+// 应该立刻重新建事件，而不是被内存里那个已解决的旧事件挡住好几次探测。
+func TestManualResolveAllowsImmediateNewIncident(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := testRepo(t)
+	srv := testServer(t, repo, 1)
+	svc := testService(t, repo, "manual-resolve.example")
+	// trigger_count = 1：一次失败就应该建事件
+	task := testProbeTask(t, repo, svc.ID, srv.ID, 1)
+
+	hc := New(repo, false, 8)
+	feed(t, hc, svc, task, false, 1)
+
+	roots := activeRoots(t, repo)
+	if len(roots) != 1 {
+		t.Fatalf("expected 1 active incident, got %d", len(roots))
+	}
+	oldID := roots[0].ID
+
+	// 服务恢复一次（重置连续失败计数），随后人工解决事件
+	feed(t, hc, svc, task, true, 1)
+	inc, err := repo.GetIncident(ctx, oldID)
+	if err != nil {
+		t.Fatalf("reload incident: %v", err)
+	}
+	inc.Status = "resolved"
+	if err := repo.UpdateIncident(ctx, inc); err != nil {
+		t.Fatalf("resolve incident manually: %v", err)
+	}
+
+	// 再次故障：一次失败就应该建出新事件（而不是等 5 次）
+	feed(t, hc, svc, task, false, 1)
+
+	roots = activeRoots(t, repo)
+	if len(roots) != 1 {
+		t.Fatalf("人工解决后再次故障应立即重建事件, active roots=%d", len(roots))
+	}
+	if roots[0].ID == oldID {
+		t.Fatalf("新建事件不应复用已解决的事件 #%d", oldID)
+	}
+}
+
+// activeRoots 返回当前未解决的根事件
+func activeRoots(t *testing.T, repo repository.Repository) []*model.Incident {
+	t.Helper()
+
+	incidents, err := repo.ListActiveIncidents(context.Background())
+	if err != nil {
+		t.Fatalf("list active incidents: %v", err)
+	}
+	return incidents
+}

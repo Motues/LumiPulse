@@ -26,25 +26,56 @@ func (r *repo) CreateProbeTask(ctx context.Context, t *model.ProbeTask) error {
 	return nil
 }
 
+// probeTaskRow 查询探测任务用的行结构。
+// server_id 可为 NULL，用 sql.NullInt64 直接扫，避免像以前那样为了拿到它
+// 再按行查一次（列表接口的 N+1）。
+type probeTaskRow struct {
+	ID           int64         `db:"id"`
+	ServiceID    int64         `db:"service_id"`
+	ServerID     sql.NullInt64 `db:"server_id"`
+	TriggerCount int           `db:"trigger_count"`
+	IsActive     bool          `db:"is_active"`
+	CreatedAt    string        `db:"created_at"`
+	UpdatedAt    string        `db:"updated_at"`
+	ServiceName  string        `db:"service_name"`
+	ServerName   string        `db:"server_name"`
+}
+
+func (row *probeTaskRow) toModel() *model.ProbeTask {
+	task := &model.ProbeTask{
+		ID:           row.ID,
+		ServiceID:    row.ServiceID,
+		TriggerCount: row.TriggerCount,
+		IsActive:     row.IsActive,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		ServiceName:  row.ServiceName,
+		ServerName:   row.ServerName,
+	}
+	if row.ServerID.Valid {
+		serverID := row.ServerID.Int64
+		task.ServerID = &serverID
+	}
+	return task
+}
+
 func (r *repo) ListProbeTasks(ctx context.Context) ([]*model.ProbeTask, error) {
-	var tasks []*model.ProbeTask
-	query := `SELECT pt.*, s.name as service_name, COALESCE(sv.name, '') as server_name
+	query := `SELECT pt.id, pt.service_id, pt.server_id, pt.trigger_count, pt.is_active,
+	                 pt.created_at, pt.updated_at,
+	                 COALESCE(s.name, '') AS service_name, COALESCE(sv.name, '') AS server_name
 			  FROM ProbeTask pt
 			  LEFT JOIN Service s ON s.id = pt.service_id
 			  LEFT JOIN Server sv ON sv.id = pt.server_id
 			  ORDER BY pt.id ASC`
-	err := r.db.SelectContext(ctx, &tasks, query)
-	if err != nil {
+
+	var rows []*probeTaskRow
+	if err := r.db.SelectContext(ctx, &rows, query); err != nil {
 		return nil, err
 	}
-	// Handle nullable server_id
-	for _, t := range tasks {
-		var serverID sql.NullInt64
-		r.db.GetContext(ctx, &serverID, "SELECT server_id FROM ProbeTask WHERE id = ?", t.ID)
-		if serverID.Valid {
-			v := serverID.Int64
-			t.ServerID = &v
-		}
+
+	tasks := make([]*model.ProbeTask, 0, len(rows))
+	for _, row := range rows {
+		tasks = append(tasks, row.toModel())
 	}
 	return tasks, nil
 }
@@ -52,38 +83,21 @@ func (r *repo) ListProbeTasks(ctx context.Context) ([]*model.ProbeTask, error) {
 const probeTaskCols = "id, service_id, server_id, trigger_count, is_active, created_at, updated_at"
 
 func (r *repo) GetProbeTask(ctx context.Context, id int64) (*model.ProbeTask, error) {
-	var t model.ProbeTask
-	err := r.db.GetContext(ctx, &t, "SELECT "+probeTaskCols+" FROM ProbeTask WHERE id = ?", id)
+	var row probeTaskRow
+	err := r.db.GetContext(ctx, &row, "SELECT "+probeTaskCols+" FROM ProbeTask WHERE id = ?", id)
 	if err != nil {
 		return nil, err
 	}
-	// Handle nullable server_id
-	var serverID sql.NullInt64
-	r.db.GetContext(ctx, &serverID, "SELECT server_id FROM ProbeTask WHERE id = ?", id)
-	if serverID.Valid {
-		v := serverID.Int64
-		t.ServerID = &v
-	} else {
-		t.ServerID = nil
-	}
-	return &t, nil
+	return row.toModel(), nil
 }
 
 func (r *repo) GetProbeTaskByService(ctx context.Context, serviceID int64) (*model.ProbeTask, error) {
-	var t model.ProbeTask
-	err := r.db.GetContext(ctx, &t, "SELECT "+probeTaskCols+" FROM ProbeTask WHERE service_id = ?", serviceID)
+	var row probeTaskRow
+	err := r.db.GetContext(ctx, &row, "SELECT "+probeTaskCols+" FROM ProbeTask WHERE service_id = ?", serviceID)
 	if err != nil {
 		return nil, err
 	}
-	var serverID sql.NullInt64
-	r.db.GetContext(ctx, &serverID, "SELECT server_id FROM ProbeTask WHERE id = ?", t.ID)
-	if serverID.Valid {
-		v := serverID.Int64
-		t.ServerID = &v
-	} else {
-		t.ServerID = nil
-	}
-	return &t, nil
+	return row.toModel(), nil
 }
 
 func (r *repo) UpdateProbeTask(ctx context.Context, t *model.ProbeTask) error {

@@ -1,10 +1,13 @@
 package http
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"lumipluse-backend/internal/model"
 	"lumipluse-backend/internal/pkg/i18n"
 	"lumipluse-backend/internal/pkg/utils"
+	"lumipluse-backend/internal/repository"
 	"net/http"
 	"strconv"
 	"strings"
@@ -110,16 +113,15 @@ func (h *Handler) CreateIncidentUpdate(c *gin.Context) {
 	h.Repo.UpdateChildrenStatus(c.Request.Context(), id, req.Status)
 
 	// Update service status based on incident state
-	if svc, err := h.Repo.GetService(c.Request.Context(), inc.ServiceID); err == nil {
-		if req.Status == "resolved" {
-			svc.Status = "operational"
-		} else {
-			switch inc.Impact {
-			case "critical":
-				svc.Status = "outage"
-			default:
-				svc.Status = "degraded"
-			}
+	if req.Status == "resolved" {
+		// 合并事件可能覆盖多个服务，必须全部恢复，否则其余服务会永久停在故障态
+		h.restoreIncidentServices(c.Request.Context(), inc)
+	} else if svc, err := h.Repo.GetService(c.Request.Context(), inc.ServiceID); err == nil {
+		switch inc.Impact {
+		case "critical":
+			svc.Status = "outage"
+		default:
+			svc.Status = "degraded"
 		}
 		h.Repo.UpdateService(c.Request.Context(), svc)
 	}
@@ -214,14 +216,6 @@ func (h *Handler) UpdateIncident(c *gin.Context) {
 	}
 	if req.Status != "" {
 		inc.Status = req.Status
-
-		// If resolved, restore service status
-		if req.Status == "resolved" {
-			if svc, err := h.Repo.GetService(c.Request.Context(), inc.ServiceID); err == nil {
-				svc.Status = "operational"
-				h.Repo.UpdateService(c.Request.Context(), svc)
-			}
-		}
 	}
 
 	// 复盘字段：指针区分「未传」与「显式清空」，因此传空字符串也能把内容清掉
@@ -280,6 +274,11 @@ func (h *Handler) UpdateIncident(c *gin.Context) {
 		h.Repo.UpdateChildrenStatus(c.Request.Context(), id, req.Status)
 	}
 
+	// 解决事件后恢复全部受影响服务的状态（合并事件可能覆盖多个服务）
+	if req.Status == "resolved" {
+		h.restoreIncidentServices(c.Request.Context(), inc)
+	}
+
 	h.InvalidateSummary()
 
 	c.JSON(http.StatusOK, model.APIResponse{
@@ -298,13 +297,10 @@ func (h *Handler) DeleteIncident(c *gin.Context) {
 		return
 	}
 
-	// Restore service status before deleting
+	// Restore service status before deleting（合并事件要恢复全部受影响服务）
 	if inc, err := h.Repo.GetIncident(c.Request.Context(), id); err == nil {
 		if inc.Status != "resolved" {
-			if svc, err := h.Repo.GetService(c.Request.Context(), inc.ServiceID); err == nil {
-				svc.Status = "operational"
-				h.Repo.UpdateService(c.Request.Context(), svc)
-			}
+			h.restoreIncidentServices(c.Request.Context(), inc)
 		}
 	}
 
@@ -446,21 +442,24 @@ func (h *Handler) MergeIncident(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Target incident is a child event and cannot host other incidents"})
 		return
 	}
+	// 父事件已解决时不能接收子事件：解决时已经同步过子事件，之后挂进来的事件
+	// 不会再被解决，会在公开列表里彻底消失（幽灵事件）。
+	if target.Status == "resolved" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Cannot merge into a resolved incident"})
+		return
+	}
 
-	// Set source as child of target
-	source.ParentID = &target.ID
-	if err := h.Repo.UpdateIncident(c.Request.Context(), source); err != nil {
+	// 合并必须在一个事务里完成（校验 + 写父子关系 + 重挂子树 + 合并受影响服务），
+	// 否则并发的两个请求可能把 A 挂到 B 下、同时把 B 挂到 A 下，形成循环父子。
+	if err := h.Repo.MergeIncidents(c.Request.Context(), target.ID, source.ID); err != nil {
+		if errors.Is(err, repository.ErrIncidentConflict) {
+			c.JSON(http.StatusConflict, gin.H{"code": 409, "message": "事件状态已变化（已被解决或已合并），请刷新后重试"})
+			return
+		}
 		utils.Error("merge incident failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to merge incidents"})
 		return
 	}
-
-	// Merge affected services into target for status tracking
-	targetSvcs := parseAffectedServices(target.AffectedServices)
-	sourceSvcs := parseAffectedServices(source.AffectedServices)
-	merged := appendIfMissing(targetSvcs, sourceSvcs...)
-	target.AffectedServices = joinServiceIDs(merged)
-	h.Repo.UpdateIncident(c.Request.Context(), target)
 
 	// Add merge notes
 	h.Repo.CreateIncidentUpdate(c.Request.Context(), &model.IncidentUpdate{
@@ -510,11 +509,14 @@ func (h *Handler) SplitIncident(c *gin.Context) {
 		return
 	}
 
-	parentID := *child.ParentID
-
-	// Clear parent_id to split out
-	child.ParentID = nil
-	if err := h.Repo.UpdateIncident(c.Request.Context(), child); err != nil {
+	// 拆分同样要在事务里做：解除父子关系的同时，把只有该子事件还在声明的服务
+	// 从父事件的 affected_services 中移除，否则父事件会继续为已拆走的服务兜底。
+	parentID, err := h.Repo.SplitIncident(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrIncidentConflict) {
+			c.JSON(http.StatusConflict, gin.H{"code": 409, "message": "事件状态已变化（已被拆分或解决），请刷新后重试"})
+			return
+		}
 		utils.Error("split incident %d failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "Failed to split incident"})
 		return
@@ -541,6 +543,47 @@ func (h *Handler) SplitIncident(c *gin.Context) {
 		Code:    200,
 		Message: "Incident split",
 	})
+}
+
+// restoreIncidentServices 把事件关联的所有服务恢复为 operational。
+//
+// 合并事件的 affected_services 可能包含多个服务、子事件也各自关联服务，
+// 只恢复 inc.ServiceID 会让其余服务永久停在 degraded/outage：
+// 检查器只会恢复它自己解决的那条事件，人工解决后不会再有人来擦这个状态。
+func (h *Handler) restoreIncidentServices(ctx context.Context, inc *model.Incident) {
+	if inc == nil {
+		return
+	}
+
+	ids := make([]int64, 0, 4)
+	if inc.ServiceID > 0 {
+		ids = append(ids, inc.ServiceID)
+	}
+	for _, id := range parseAffectedServices(inc.AffectedServices) {
+		ids = appendIfMissing(ids, id)
+	}
+	for _, child := range inc.Children {
+		if child.ServiceID > 0 {
+			ids = appendIfMissing(ids, child.ServiceID)
+		}
+		for _, id := range parseAffectedServices(child.AffectedServices) {
+			ids = appendIfMissing(ids, id)
+		}
+	}
+
+	for _, id := range ids {
+		svc, err := h.Repo.GetService(ctx, id)
+		if err != nil || svc == nil {
+			continue // 服务已被删除
+		}
+		if svc.Status == "operational" {
+			continue
+		}
+		svc.Status = "operational"
+		if err := h.Repo.UpdateService(ctx, svc); err != nil {
+			utils.Info("failed to restore service %d: %v", id, err)
+		}
+	}
 }
 
 // Helper functions for affected_services
@@ -571,12 +614,4 @@ func appendIfMissing(existing []int64, newIDs ...int64) []int64 {
 		}
 	}
 	return result
-}
-
-func joinServiceIDs(ids []int64) string {
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = strconv.FormatInt(id, 10)
-	}
-	return strings.Join(parts, ",")
 }

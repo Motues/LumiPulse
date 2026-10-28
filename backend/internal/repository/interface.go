@@ -2,8 +2,16 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"lumipluse-backend/internal/model"
 )
+
+// ErrIncidentConflict 事件的前置条件在事务内不再成立：
+// 已解决、已经是子事件、或合并会形成循环父子。
+// 合并/拆分都是「读-改-写」，必须在同一个事务里重新校验，
+// 否则并发请求（两个管理员、双击提交、脚本调用）可能把 A 挂到 B 下、
+// 同时又把 B 挂到 A 下，产生两个都不再是根事件的循环父子。
+var ErrIncidentConflict = errors.New("incident state conflict")
 
 type Repository interface {
 	// Ping 检查数据库连通性（readiness 探针使用）
@@ -133,6 +141,18 @@ type Repository interface {
 	ListIncidentsByServer(ctx context.Context, serverID int64) ([]*model.Incident, error)
 	ListChildIncidents(ctx context.Context, parentID int64) ([]*model.Incident, error)
 	UpdateChildrenStatus(ctx context.Context, parentID int64, status string) error
+	// MergeIncidents 原子地把 source 挂为 target 的子事件：先校验双方都是未解决的
+	// 根事件，再在同一事务里写父子关系、把 source 的整棵子树统一挂到 target 下，
+	// 并把受影响服务取并集。并发合并的第二个事务会因条件更新命中 0 行而回滚，
+	// 因此不会出现 A→B 与 B→A 同时成立。
+	MergeIncidents(ctx context.Context, targetID, sourceID int64) error
+	// SplitIncident 原子地把子事件从父事件拆出来，并从父事件的 affected_services
+	// 中移除只有该子事件还在声明的服务。返回原父事件 ID。
+	SplitIncident(ctx context.Context, id int64) (int64, error)
+	// BreakIncidentCycles 修复历史脏数据里的循环父子（A→B 且 B→A）。
+	// 这类事件的 parent_id 都不为空，列表与仪表盘会把它们全部隐藏，
+	// 且检查器永远无法把它们解决。返回修复的环数量。
+	BreakIncidentCycles(ctx context.Context) (int, error)
 	// Data export/import
 	ImportFullData(ctx context.Context, data *model.ImportData) error
 }

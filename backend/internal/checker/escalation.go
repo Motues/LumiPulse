@@ -155,8 +155,14 @@ func (hc *HealthChecker) sendEscalation(ctx context.Context, inc *model.Incident
 		utils.Info("checker suppressed escalation email for incident #%d (quiet hours)", inc.ID)
 		return
 	}
-	sendServiceAlertMail(inc.ServiceID, subject, body)
-	hc.notifySubscribers(ctx, svc, subject, body)
+
+	// 合并事件按「受影响服务集合」判断白名单：只用 inc.ServiceID 会让
+	// 主服务没勾选、其它服务勾选了的升级通知被静默丢弃。
+	serviceIDs := appendIfMissing(incidentServiceIDs(inc), inc.ServiceID)
+	if !sendIncidentAlertMail(serviceIDs, subject, body) {
+		utils.Info("checker suppressed escalation email for incident #%d (no monitored service matched)", inc.ID)
+	}
+	hc.notifySubscribersFor(ctx, serviceIDs, subject, body)
 }
 
 // loadService 取事件关联的服务。服务可能已被删除，此时返回占位对象，

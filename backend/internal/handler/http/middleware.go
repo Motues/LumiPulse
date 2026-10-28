@@ -79,6 +79,9 @@ type apiKeyRateLimiter struct {
 	window map[int64]*rateWindow
 }
 
+// maxRateLimitWindows 限流窗口最多保留多少条记录，防止不断新建/删除密钥后无限增长
+const maxRateLimitWindows = 10000
+
 // allow 记一次请求，返回是否放行
 func (l *apiKeyRateLimiter) allow(keyID int64, limit int) bool {
 	if limit <= 0 {
@@ -96,6 +99,13 @@ func (l *apiKeyRateLimiter) allow(keyID int64, limit int) bool {
 	if w == nil || now.Sub(w.start) >= time.Minute {
 		w = &rateWindow{start: now}
 		l.window[keyID] = w
+	}
+	if len(l.window) > maxRateLimitWindows {
+		for id, entry := range l.window {
+			if now.Sub(entry.start) >= time.Minute {
+				delete(l.window, id)
+			}
+		}
 	}
 	w.count++
 	return w.count <= limit

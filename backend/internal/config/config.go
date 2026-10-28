@@ -26,6 +26,13 @@ type Config struct {
 	MaxProbeConcurrency int `yaml:"MAX_PROBE_CONCURRENCY"`
 	// MaintenanceRemindMinutes 维护计划开始前的提醒提前量（分钟，默认 30，0 = 关闭提醒）。
 	MaintenanceRemindMinutes int `yaml:"MAINTENANCE_REMIND_MINUTES"`
+	// TrustedProxies 可信反向代理的地址列表（逗号分隔，支持单个 IP 与 CIDR 网段）。
+	//
+	// 只有来自这些地址的请求才会采信 CF-Connecting-IP / X-Real-IP / X-Forwarded-For。
+	// 留空表示保持历史行为：信任任意来源的转发头。部署在 nginx / Cloudflare 后面时
+	// 建议填上代理网段，否则客户端可以自带一个假 IP 头绕过登录失败封禁，
+	// 审计日志里的来源 IP 也不可信。
+	TrustedProxies string `yaml:"TRUSTED_PROXIES"`
 }
 
 var GlobalConfig *Config

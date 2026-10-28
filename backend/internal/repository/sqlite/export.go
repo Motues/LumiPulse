@@ -6,7 +6,12 @@ import (
 	"lumipluse-backend/internal/pkg/utils"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// defaultImportTriggerCount 导入时重建探测任务使用的失败阈值。
+// 导出结构里没有 ProbeTask，无法还原各服务自定义的阈值，统一按默认值 5 重建。
+const defaultImportTriggerCount = 5
 
 func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -14,6 +19,8 @@ func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error
 		return err
 	}
 	defer tx.Rollback()
+
+	now := time.Now().Format(time.RFC3339)
 
 	// Clear tables in dependency order
 	tables := []string{
@@ -79,6 +86,19 @@ func (r *repo) ImportFullData(ctx context.Context, data *model.ImportData) error
 		}
 		s.ID, _ = res.LastInsertId()
 		serviceIDMap[oldID] = s.ID
+	}
+
+	// 重建探测任务。ProbeTask.service_id 带 ON DELETE CASCADE，上面的
+	// DELETE FROM Service 已经把任务全部删掉了；不补回来的话检查器会跳过
+	// 所有服务（没有任务就不探测），表现为「导入成功、监控静默停止」，
+	// 而且界面上没有任何报错。导出结构里没有任务，因此统一按默认值重建。
+	for _, s := range data.Services {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO ProbeTask (service_id, server_id, trigger_count, is_active, created_at, updated_at)
+			 VALUES (?, NULL, ?, 1, ?, ?)`,
+			s.ID, defaultImportTriggerCount, now, now); err != nil {
+			return err
+		}
 	}
 
 	// Import incidents — store old→new ID mapping
